@@ -43,6 +43,7 @@ export function model(D) {
   const tasks = arr(D.tasks).map((t, i) => {
     const st = str(t.status).trim().toLowerCase().replace(/[\s-]+/g, '_') || 'unknown'; let p = Number(t.progress);
     if (t.progress == null || t.progress === '' || !isFinite(p)) p = st === 'done' ? 100 : 0;
+    if (st === 'done') p = 100; // a done task always shows 100% (bars, drawer, missions, overall)
     const o = str(t.owner);
     return { id: str(t.id) || 'task-' + i, title: str(t.title) || str(t.id) || 'Untitled task', owner: o, status: st, progress: Math.round(Math.max(0, Math.min(100, p))),
       due: str(t.due).trim().slice(0, 10), note: str(t.note).trim(),
@@ -141,13 +142,14 @@ export function createOffice(root, opts = {}) {
 
   /* ---------- comms log ---------- */
   function renderLog() {
+    // Newest first, so the latest message is always at the top (never below the fold, desktop or mobile).
     const L = q('#log'); const msgs = M.msgs;
-    L.innerHTML = msgs.length ? msgs.map(m => {
+    L.innerHTML = msgs.length ? msgs.slice().reverse().map(m => {
       const f = bot(m.from), t = bot(m.to);
       return '<li data-k="' + esc(m.key) + '"><time>' + hhmmTs(m.ts) + '</time><span class="ft"><b>' + esc(f.emoji + ' ' + f.name) + '</b> → <b>' + esc(t.emoji + ' ' + t.name) + '</b></span><span class="tx">' + esc(m.text) + '</span></li>';
     }).join('') : '<li class="empty" style="display:block">No messages yet.</li>';
-    q('#logn').textContent = msgs.length ? msgs.length + ' message' + (msgs.length === 1 ? '' : 's') + ' · times ' + TZ_LABEL + (M.skipped ? ' · ' + M.skipped + ' skipped (unknown bot)' : '') : 'times ' + TZ_LABEL;
-    if (msgs.length && opts.logToEnd !== false) L.scrollTop = L.scrollHeight;
+    q('#logn').textContent = msgs.length ? msgs.length + ' message' + (msgs.length === 1 ? '' : 's') + ' · newest first · times ' + TZ_LABEL + (M.skipped ? ' · ' + M.skipped + ' skipped (unknown bot)' : '') : 'times ' + TZ_LABEL;
+    if (msgs.length && opts.logToEnd !== false) L.scrollTop = 0;
     curMsg = -2;
   }
 

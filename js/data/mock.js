@@ -32,6 +32,7 @@ export function create() {
   function emit(wsId, table, eventType, n, o) { (subs.get(wsId) || new Set()).forEach(s => s.onEvent({ table, eventType, new: n, old: o })); }
   function ws(id) { const w = db.workspaces.find(x => x.id === id); if (!w) throw new Error('Workspace not found'); return w; }
   function requireOwner(id) { if (!signedIn || ws(id).owner_id !== user.id) throw new Error('Only the workspace owner can do that'); }
+  function rpcGetShareToken({ p_workspace_id }) { requireOwner(p_workspace_id); const w = ws(p_workspace_id); return { enabled: w.share_enabled, token: w.share_token }; }
 
   /* --- simulated activity on Demo HQ (fictional) --- */
   let simTimer = 0, simI = 0;
@@ -99,9 +100,10 @@ export function create() {
       const m = { workspace_id: wsId, user_id: null, email, role: 'viewer', invited_at: new Date().toISOString(), accepted_at: null }; db.members.push(m); return m;
     },
     async removeMember(wsId, email) { requireOwner(wsId); db.members = db.members.filter(m => !(m.workspace_id === wsId && m.email === email && m.role !== 'owner')); },
-    async getShare(wsId) { requireOwner(wsId); const w = ws(wsId); return { share_enabled: w.share_enabled, share_token: w.share_token }; },
+    // Mirrors the backend: get_share_token(p_workspace_id) → {enabled, token}; getShare maps it the same way as supabase.js.
+    async getShare(wsId) { const r = rpcGetShareToken({ p_workspace_id: wsId }); return { share_enabled: !!(r && r.enabled), share_token: (r && r.token) || null }; },
     // Mirrors set_share_link(p_workspace_id, p_enabled, p_regenerate): disabling clears the token.
-    async setShareLink(wsId, enabled, regenerate = false) { requireOwner(wsId); const w = ws(wsId); w.share_enabled = !!enabled; w.share_token = enabled ? ((!w.share_token || regenerate) ? b62(32) : w.share_token) : null; return { share_enabled: w.share_enabled, share_token: w.share_token }; },
+    async setShareLink(wsId, enabled, regenerate = false) { requireOwner(wsId); const w = ws(wsId); w.share_enabled = !!enabled; w.share_token = enabled ? ((!w.share_token || regenerate) ? b62(32) : w.share_token) : null; const r = { enabled: w.share_enabled, token: w.share_token }; return { share_enabled: !!r.enabled, share_token: r.token || null }; },
     async loadShared(slug, token) {
       await sleep(120); const w = db.workspaces.find(x => x.slug === slug);
       if (!w || !w.share_enabled || !token || token !== w.share_token) throw new Error('This read-only link is off or no longer valid.');

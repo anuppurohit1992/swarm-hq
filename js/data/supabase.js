@@ -111,7 +111,8 @@ export async function create(cfg) {
     },
     async inviteViewer(wsId, email) { return chk(await sb.rpc('invite_member', { p_workspace_id: wsId, p_email: String(email).trim().toLowerCase(), p_role: 'viewer' })); },
     async removeMember(wsId, email) { chk(await sb.rpc('remove_member', { p_workspace_id: wsId, p_email: email })); },
-    async getShare(wsId) { return one(chk(await sb.from('workspaces').select('share_enabled,share_token').eq('id', wsId))) || { share_enabled: false, share_token: null }; },
+    // share_token is owner-only and NOT selectable from the table (column privileges); read it via RPC only.
+    async getShare(wsId) { const r = chk(await sb.rpc('get_share_token', { p_workspace_id: wsId })); return { share_enabled: !!(r && r.enabled), share_token: (r && r.token) || null }; },
     async setShareLink(wsId, enabled, regenerate = false) {
       const r = chk(await sb.rpc('set_share_link', { p_workspace_id: wsId, p_enabled: !!enabled, p_regenerate: !!regenerate }));
       return { share_enabled: !!(r && r.enabled), share_token: (r && r.token) || null };
