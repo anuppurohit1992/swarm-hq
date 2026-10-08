@@ -5,7 +5,7 @@ import { slugify, slugWithSuffix } from '../util.js';
 
 const SB_SRC = new URL('../../vendor/supabase-js-2.117.3/supabase.js', import.meta.url).href;
 const BOT_COLS = 'id,workspace_id,slug,name,role,emoji,activity,doing,last_heartbeat,key_prefix,revoked_at,created_at'; // key hashes live in bot_keys (no client access)
-const WS_COLS = 'id,slug,name,owner_id,share_enabled,created_at';
+const WS_COLS = 'id,slug,name,owner_id,share_enabled,created_at,run_started_at'; // NEVER select * or share_token (column privileges)
 
 function loadScript(src) {
   return new Promise((res, rej) => {
@@ -71,26 +71,47 @@ export async function create(cfg) {
     async renameWorkspace(id, name) { chk(await sb.rpc('update_workspace', { p_workspace_id: id, p_name: name })); },
     async deleteWorkspace(id, confirmName) { chk(await sb.rpc('delete_workspace', { p_workspace_id: id, p_confirm_name: confirmName })); },
     async loadRows(wsId) {
-      const since = new Date(Date.now() - 7 * 864e5).toISOString();
-      const [bots, missions, tasks, messages] = await Promise.all([
+      // Comms log: last 24 h only (backend also clears on new run). Always list workspace columns explicitly.
+      const since = new Date(Date.now() - 24 * 864e5).toISOString();
+      const [ws, bots, missions, tasks, messages] = await Promise.all([
+        sb.from('workspaces').select(WS_COLS).eq('id', wsId).maybeSingle(),
         sb.from('bots').select(BOT_COLS).eq('workspace_id', wsId).order('created_at'),
         sb.from('missions').select('*').eq('workspace_id', wsId).order('sort'),
         sb.from('tasks').select('*').eq('workspace_id', wsId),
         sb.from('messages').select('*').eq('workspace_id', wsId).gte('created_at', since).order('created_at', { ascending: false }).limit(500),
       ]);
-      return { bots: chk(bots), missions: chk(missions), tasks: chk(tasks), messages: chk(messages).reverse() };
+      const w = one(chk(ws));
+      return {
+        bots: chk(bots), missions: chk(missions), tasks: chk(tasks), messages: chk(messages).reverse(),
+        run_started_at: w && w.run_started_at || null,
+      };
     },
-    /** Realtime: postgres_changes on bots/tasks/missions/messages. onStatus gets connecting|connected|reconnecting|offline. */
+    /**
+     * Realtime:
+     * - filtered INSERT/UPDATE on bots/tasks/missions/messages (workspace_id)
+     * - filtered UPDATE on workspaces (id) → run_started_at clears the comms log
+     * - UNfiltered DELETE on bots/tasks/missions/messages (filtered channels never get DELETE; old = {id} only)
+     * onStatus: connecting|connected|reconnecting|offline. onResync after reconnect.
+     */
     subscribe(wsId, { onEvent, onStatus, onResync }) {
       let state = 'connecting', wasDown = false, closed = false;
       const set = s => { if (state !== s) { state = s; onStatus && onStatus(s); } };
       onStatus && onStatus('connecting');
       const ch = sb.channel('ws-' + wsId);
       for (const table of ['bots', 'tasks', 'missions', 'messages']) {
-        ch.on('postgres_changes', { event: '*', schema: 'public', table, filter: 'workspace_id=eq.' + wsId }, p => {
-          onEvent({ table, eventType: p.eventType, new: p.eventType === 'DELETE' ? null : p.new, old: p.old });
+        for (const event of ['INSERT', 'UPDATE']) {
+          ch.on('postgres_changes', { event, schema: 'public', table, filter: 'workspace_id=eq.' + wsId }, p => {
+            onEvent({ table, eventType: p.eventType, new: p.new, old: p.old });
+          });
+        }
+        // Filtered subscriptions NEVER receive DELETE. Bare {id} only (replica identity default).
+        ch.on('postgres_changes', { event: 'DELETE', schema: 'public', table }, p => {
+          onEvent({ table, eventType: 'DELETE', new: null, old: p.old });
         });
       }
+      ch.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'workspaces', filter: 'id=eq.' + wsId }, p => {
+        onEvent({ table: 'workspaces', eventType: 'UPDATE', new: p.new, old: p.old });
+      });
       ch.subscribe((status) => {
         if (closed) return;
         if (status === 'SUBSCRIBED') { if (wasDown && onResync) onResync(); wasDown = false; set(navigator.onLine === false ? 'offline' : 'connected'); }
@@ -118,7 +139,7 @@ export async function create(cfg) {
       const d = chk(await sb.rpc('get_shared_workspace', { p_token: token }));
       if (!d || !d.workspace) throw new Error('This read-only link is off or no longer valid.');
       const id = (x, k) => (x || []).map(r => ({ id: r.id != null ? r.id : r.slug, ...r }));
-      return { workspace: d.workspace, rows: { bots: id(d.bots), missions: id(d.missions), tasks: id(d.tasks), messages: id(d.messages) } };
+      return { workspace: d.workspace, rows: { bots: id(d.bots), missions: id(d.missions), tasks: id(d.tasks), messages: id(d.messages), run_started_at: d.workspace && d.workspace.run_started_at || null } };
     },
 
     async createBot(wsId, { slug, name, role, emoji }) {

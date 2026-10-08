@@ -25,7 +25,7 @@ export async function renderLanding(el, { backend, focusSignIn, notice }) {
     '<section id="how" class="how" aria-labelledby="h-how"><h2 id="h-how">How it works</h2><ol class="steps">' +
     '<li><span class="num mono">1</span><div><b>Sign in and name your office</b><p>Use an email magic link' + (anyOauth ? ', ' + [pv.google && 'Google', pv.github && 'GitHub'].filter(Boolean).join(' or ') : '') + '. You get a private workspace with empty desks.</p></div></li>' +
     '<li><span class="num mono">2</span><div><b>Connect your bots</b><p>Each bot gets its own API key and reports its activity, tasks and messages with one HTTPS call.</p></div></li>' +
-    '<li><span class="num mono">3</span><div><b>Watch them work</b><p>Desks animate in real time, envelopes fly between bots and progress bars fill up.</p></div></li></ol></section>' +
+    '<li><span class="num mono">3</span><div><b>Watch them work</b><p>Desks animate in real time, envelopes fly between bots and progress bars fill up. Comms log clears every 24 h or when a new run starts.</p></div></li></ol></section>' +
     '<footer class="lf">Swarm HQ · <a href="https://github.com/anuppurohit1992/swarm-hq">source on GitHub</a></footer></div></div>';
 
   // Demo office preview: fictional rows + the mock simulator.

@@ -16,7 +16,7 @@ function bodyMarkup(empty, o) {
   if (!empty) {
     return '<section class="panel hud" id="hud" aria-label="Summary"></section><div class="grid"><div class="main">' + office + '</div>' +
       '<aside class="panel side" aria-labelledby="h-q"><div class="ph"><h2 id="h-q">Missions</h2><button class="btn" id="reset" type="button">Show all</button></div><p class="sel" id="sel" aria-live="polite"></p><div id="quests"></div></aside></div>' +
-      '<footer>Overall progress = average of every task\'s progress %. Active bots = activity other than idle. Times in ' + esc(TZ_LABEL) + '. Select a desk to open its details.</footer>';
+      '<footer>Overall progress = average of every task\'s progress %. Active bots = activity other than idle. Times in ' + esc(TZ_LABEL) + '. Comms log clears every 24 h or when a new run starts. Select a desk to open its details.</footer>';
   }
   const ws = o.workspace || {};
   const aside = o.isOwner
@@ -86,5 +86,7 @@ export async function renderOfficeView(el, opts) {
   else setState('shared');
   if (opts.source.pollMs) pollT = setInterval(onResync, opts.source.pollMs);
   const hbTick = setInterval(() => { if (office) office.setConn(connObj()); }, 30000);
-  return () => { dead = true; clearInterval(pollT); clearInterval(hbTick); unsub && unsub(); unwire && unwire(); office && office.destroy(); drawer && drawer.destroy(); };
+  // Local 24h prune (~once a minute) so the log stays right if a DELETE was missed while offline.
+  const pruneT = setInterval(() => { if (!dead && rows.prune()) refresh(); }, 60000);
+  return () => { dead = true; clearInterval(pollT); clearInterval(hbTick); clearInterval(pruneT); unsub && unsub(); unwire && unwire(); office && office.destroy(); drawer && drawer.destroy(); };
 }

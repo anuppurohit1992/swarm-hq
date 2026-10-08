@@ -10,7 +10,7 @@ Matches `backend/supabase/migrations/*` (Swarm HQ v1). All calls are in `js/data
   `set_share_link(p_workspace_id, p_enabled, p_regenerate)` → `{enabled, token}` (toggle / reset). The frontend maps both to `{share_enabled, share_token}`.
 - `members` (owner sees all rows): `workspace_id, user_id, email, role, invited_at, accepted_at`
 - `bots`: `id, workspace_id, slug, name, role, emoji, activity, doing, last_heartbeat, key_prefix, revoked_at, created_at`
-- `missions`: `*` · `tasks`: `*` (`owner_bot` may be NULL → shown as "Unassigned") · `messages`: last 7 days, newest 500
+- `missions`: `*` · `tasks`: `*` (`owner_bot` may be NULL → shown as "Unassigned") · `messages`: last 24 h (and since `run_started_at`), newest 500
 
 ## Realtime
 One channel per open workspace, `postgres_changes` (`*`) on `bots`, `tasks`, `missions`, `messages` with
@@ -39,3 +39,6 @@ Errors raised as `swarm:<status>:<code>` are mapped to friendly messages.
 ## Auth
 Email magic link via `signInWithOtp` (implicit flow, `emailRedirectTo = SITE_URL`). Google/GitHub via
 `signInWithOAuth` only when `oauth.google` / `oauth.github` are `true` in `config.js`.
+
+## Comms log retention (frontend)
+Comms log clears every 24 h or when a new run starts. Load messages with `created_at > now()-24h`, keep `run_started_at` on the workspace, subscribe to workspace UPDATE + unfiltered message DELETE, prune locally about once a minute, and re-fetch on reconnect. Share-link viewers get both rules via `get_shared_workspace` polling — do not double-apply.

@@ -65,7 +65,7 @@ export function model(D) {
 
 const P = { fl: ['#262b42', '#2a304a'], wall: '#343a5c', trim: '#222640', base: '#1a1d30', win: '#141e45', winHi: '#1c2c66', star: '#dfe6ff', frame: '#596089', desk: '#8b5e3c', deskHi: '#a8744b', deskFr: '#5c3b22', bez: '#14161f', off: '#0a0c15', chair: '#47508a', chairHi: '#5a64a3', chairD: '#2a3054', rug: '#3a2f62', rugB: '#5d4c96', sh: 'rgba(0,0,0,.3)', z: '#dfe6ff', lamp: 'rgba(255,214,140,.07)' };
 const HAIR = ['#2b1d14', '#5a3825', '#d8a65e', '#141414', '#8b4a2b', '#b9bccb', '#6b2f5f'], SKIN = ['#f2c9a5', '#dba77d', '#ab7349', '#7b4b2c'], SHIRT = ['#e5484d', '#3e8ef7', '#30a46c', '#f5a524', '#8e4ec6', '#12a594', '#e5689f', '#ef7a38'], PANTS = ['#2b3150', '#3b2f2a', '#203a4a', '#3a3a44'];
-const WALL = 34, CH = 62, CCH = 68, OL = '#151827', SL = 3600, FL = 1800, MAXLOOP = 10;
+const WALL = 34, CH = 62, CCH = 68, OL = '#151827', SL = 3600, FL = 1800;
 const RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 function dress(b) { const h = hash(b.id); b.hair = HAIR[h % 7]; b.skin = SKIN[(h >>> 3) % 4]; b.shirt = SHIRT[(h >>> 5) % 8]; b.pants = PANTS[(h >>> 8) % 4]; b.seed = h; b.nap = (h >>> 11) % 2; return b; }
 
@@ -92,8 +92,8 @@ export function createOffice(root, opts = {}) {
   let g, W = 300, H = 200, S = 2, PX = 1, cells = [], pos = {}, lounge = null, dead = false;
   function R(x, y, w, h, c) { g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), w, h); }
   function bot(id) { id = str(id); return M.BY[id] || { id, name: id ? id + ' (removed)' : 'Unassigned', emoji: '❔', role: '' }; }
-  function loopMsgs() { return M.msgs.slice(-MAXLOOP); }
-  let LM = loopMsgs();
+  // Live flight queue: empty on load. History stays in the comms log only.
+  let LM = [], flightT0 = 0;
 
   /* ---------- HUD ---------- */
   function liveCell() {
@@ -248,21 +248,34 @@ export function createOffice(root, opts = {}) {
     if (a === 'waiting') { R(x, y, 16, 10, '#16213f'); const f = ((t / 350) | 0) % 4; for (let k = 0; k < 3; k++) R(x + 4 + k * 3, y + 4, 2, 2, k < f ? '#fbbf24' : '#3b4670'); return; }
     R(x, y, 16, 10, '#1d1838'); const b = ((t / 600) | 0) % 2; R(x + 2, y + 2, 8, 3, b ? '#c4b5fd' : '#7c6bd6'); R(x + 6, y + 6, 8, 3, b ? '#7dd3fc' : '#3e8ef7');
   }
-  function zz(x, y, c, n) { const w = n ? 4 : 3; R(x - 1, y - 1, w + 2, w + 2, OL); R(x, y, w, 1, c); for (let i = 1; i < w - 1; i++) R(x + w - 1 - i, y + i, 1, 1, c); R(x, y + w - 1, w, 1, c); }
+  // Bigger Z letters so idle snooze reads clearly on mobile as well as desktop.
+  function zz(x, y, c, n) { const w = n === 2 ? 7 : n ? 6 : 5; R(x - 1, y - 1, w + 2, w + 2, OL); R(x, y, w, 2, c); for (let i = 2; i < w - 1; i++) R(x + w - 1 - i, y + i, 2, 1, c); R(x, y + w - 1, w, 2, c); }
+  /** Floating zzz cluster above an idle desk (canvas). */
+  function drawZzz(x, y, t) {
+    if (RM) { zz(x + 10, y - 2, P.z, 1); zz(x + 18, y - 10, P.z, 0); zz(x + 24, y - 18, P.z, 2); return; }
+    for (let k = 0; k < 3; k++) {
+      const ph = ((t + k * 750) % 2400) / 2400;
+      const ox = x + 8 + Math.round(ph * 10) + k * 2;
+      const oy = y + 4 - Math.round(ph * 22) - k * 2;
+      g.globalAlpha = .55 + .45 * (1 - ph);
+      zz(ox, oy, P.z, k === 0 ? 0 : k === 1 ? 1 : 2);
+    }
+    g.globalAlpha = 1;
+  }
   function arm(x, y1, y2, c) { R(x - 1, y1, 4, y2 - y1, OL); R(x, y1, 2, y2 - y1, c); }
   function hand(x, y, c) { R(x - 1, y - 1, 4, 4, OL); R(x, y, 2, 2, c); }
   function seated(c, t) {
     const b = c.b, x = c.cx, Y = c.y, a = b.act, hy = Y + 24, sh = b.shirt, sk = b.skin;
     if (a === 'idle' && b.nap) {
       R(x - 8, Y + 28, 16, 9, OL); R(x - 7, Y + 29, 14, 8, sh); R(x - 10, Y + 24, 20, 5, OL); R(x - 9, Y + 25, 18, 3, sh); R(x - 5, Y + 19, 10, 8, OL); R(x - 4, Y + 20, 8, 6, b.hair);
-      if (RM) { zz(x + 12, Y + 12, P.z, 1); zz(x + 18, Y + 6, P.z, 0); } else for (let k = 0; k < 2; k++) { const ph = ((t + k * 1100) % 2200) / 2200; zz(x + 10 + Math.round(ph * 6), Y + 16 - Math.round(ph * 14), P.z, k === 0); }
+      drawZzz(x, Y + 8, t);
       return;
     }
     if (a === 'typing') { const f = RM ? 0 : ((t / 110) | 0) % 2; arm(x - 8, Y + 25, hy + 9, sh); arm(x + 6, Y + 25, hy + 9, sh); hand(x - 8, Y + 23 - f, sk); hand(x + 6, Y + 22 + f, sk); }
     else if (a === 'browsing') { const m = RM ? 0 : Math.round(Math.sin(t / 300)); arm(x - 8, Y + 25, hy + 9, sh); hand(x - 8, Y + 23, sk); arm(x + 7, Y + 25, hy + 9, sh); hand(x + 9 + m, Y + 23, sk); }
     else if (a === 'reading') { const bo = RM ? 0 : ((t / 1200) | 0) % 2; arm(x + 6, Y + 22, hy + 9, sh); R(x + 1, Y + 10 + bo, 10, 13, OL); R(x + 2, Y + 11 + bo, 8, 11, '#f7f4ea'); for (let k = 0; k < 4; k++) R(x + 3, Y + 13 + bo + k * 2, k === 3 ? 4 : 6, 1, '#8e97ad'); hand(x + 2, Y + 20 + bo, sk); }
     else if (a === 'waiting') { const tp = RM ? 0 : ((t / 260) | 0) % 2; arm(x - 9, Y + 27, hy + 9, sh); hand(x - 9, Y + 25 - tp, sk); const cy = Y - 1 + (RM ? 0 : ((t / 500) | 0) % 2); R(x + 11, cy, 9, 9, OL); R(x + 12, cy + 2, 7, 5, '#fbbf24'); R(x + 13, cy + 1, 5, 7, '#fbbf24'); R(x + 15, cy + 2, 1, 3, OL); R(x + 15, cy + 4, 2, 1, OL); }
-    else if (a === 'idle') { const sip = !RM && (t % 4200) < 1300, my = sip ? Y + 22 : Y + 21, mx = sip ? x + 5 : x + 11; if (sip) arm(x + 6, Y + 25, hy + 9, sh); R(mx - 1, my - 1, 6, 5, OL); R(mx, my, 3, 3, '#efe9dc'); R(mx + 3, my + 1, 1, 1, '#efe9dc'); if (sip) hand(x + 5, Y + 24, sk); if (!sip && !RM && ((t / 400) | 0) % 2) R(mx + 1, my - 3, 1, 2, '#d7dbe6'); }
+    else if (a === 'idle') { const sip = !RM && (t % 4200) < 1300, my = sip ? Y + 22 : Y + 21, mx = sip ? x + 5 : x + 11; if (sip) arm(x + 6, Y + 25, hy + 9, sh); R(mx - 1, my - 1, 6, 5, OL); R(mx, my, 3, 3, '#efe9dc'); R(mx + 3, my + 1, 1, 1, '#efe9dc'); if (sip) hand(x + 5, Y + 24, sk); if (!sip && !RM && ((t / 400) | 0) % 2) R(mx + 1, my - 3, 1, 2, '#d7dbe6'); drawZzz(x + 2, Y - 2, t); }
     R(x - 8, hy + 6, 16, 9, OL); R(x - 7, hy + 7, 14, 8, sh); R(x - 7, hy + 7, 14, 1, 'rgba(255,255,255,.2)'); R(x - 5, hy - 1, 10, 9, OL); R(x - 4, hy, 8, 7, b.hair); R(x - 3, hy + 1, 3, 1, 'rgba(255,255,255,.22)'); R(x - 5, hy + 3, 1, 2, sk); R(x + 4, hy + 3, 1, 2, sk);
   }
   function stand(fx, fy, b, t, mv, up) {
@@ -272,8 +285,13 @@ export function createOffice(root, opts = {}) {
     R(x - 1, top - 1, 10, 9, OL); if (up) { R(x, top, 8, 7, b.hair); } else { R(x, top, 8, 7, b.skin); R(x, top, 8, 3, b.hair); R(x, top + 3, 1, 2, b.hair); R(x + 7, top + 3, 1, 2, b.hair); if (((t / 2600) | 0) % 5 || RM) { R(x + 2, top + 4, 1, 1, OL); R(x + 5, top + 4, 1, 1, OL); } R(x + 3, top + 6, 2, 1, '#c0786a'); }
   }
   function env(x, y) { x = Math.round(x); y = Math.round(y); R(x - 4, y - 3, 9, 7, '#7a5c2e'); R(x - 3, y - 2, 7, 5, '#fffaf0'); R(x - 2, y - 1, 1, 1, '#c9a96e'); R(x - 1, y, 1, 1, '#c9a96e'); R(x, y + 1, 1, 1, '#e5484d'); R(x + 1, y, 1, 1, '#c9a96e'); R(x + 2, y - 1, 1, 1, '#c9a96e'); }
-  function loopLen() { return LM.length * SL + 1400; }
-  function msgAt(t) { if (!LM.length) return { i: -1 }; if (RM) return { i: LM.length - 1, l: 0 }; const tt = t % loopLen(), i = Math.floor(tt / SL); if (i >= LM.length) return { i: -1 }; return { i, l: tt - i * SL }; }
+  // One-shot flight only. History never flies; LM holds at most the live INSERT that arrived while this page is open.
+  function msgAt(t) {
+    if (!LM.length || RM) return { i: -1 };
+    const l = t - flightT0;
+    if (l >= SL) return { i: -1, done: true }; // finished: caller clears LM
+    return { i: 0, l };
+  }
   function draw(t) {
     if (!ctx) return;
     g = bx; g.drawImage(bg, 0, 0);
@@ -286,6 +304,12 @@ export function createOffice(root, opts = {}) {
     });
     cells.forEach(c => { if (c.b.act !== 'coordinating' || c.b.vacant) return; const w = c.route && !RM ? walkAt(c, t) : { x: c.home.x, y: c.home.y }; stand(w.x, w.y, c.b, t, w.mv, w.up); });
     const m = msgAt(t);
+    if (m.done) {
+      LM = []; curMsg = -2;
+      const bub = q('#mbub'), log = q('#log');
+      if (bub) bub.hidden = true;
+      if (log) log.querySelectorAll('li.now').forEach(li => li.classList.remove('now'));
+    }
     if (m.i >= 0 && !RM) {
       const MM = LM[m.i], A = pos[MM.from], B = pos[MM.to], l = m.l;
       if (A && B && l >= 300 && l < 300 + FL) {
@@ -308,6 +332,7 @@ export function createOffice(root, opts = {}) {
       const lab = b.name + ', ' + (b.role || 'bot') + '. ' + (b.revoked ? 'Key revoked' : ACTS[b.act] + (b.doing ? ': ' + b.doing : '')) + '. Select to open details.';
       return '<button type="button" class="desk" data-bot="' + esc(b.id) + '" aria-pressed="' + (SEL === b.id) + '" aria-label="' + esc(lab) + '" style="left:' + c.x * PX + 'px;top:' + c.y * PX + 'px;width:' + c.w * PX + 'px;height:' + c.h * PX + 'px">' +
         (b.revoked ? '<span class="rvk" aria-hidden="true">Key revoked</span>' : '') +
+        (b.act === 'idle' && !b.revoked ? '<span class="zzz" aria-hidden="true"><i>z</i><i>z</i><i>z</i></span>' : '') +
         '<span class="plate' + (b.act === 'idle' ? ' idle' : '') + (b.revoked ? ' revoked' : '') + (c.ch ? ' chief' : '') + '" aria-hidden="true">' + (c.ch ? '<span style="display:flex;gap:4px;align-items:center"><span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span></span><small>' + esc(M.chiefLabel) + '</small>' : '<span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span>') + '</span></button>';
     }).join('');
     if (!M.bots.length && opts.emptySign && lounge) ov.innerHTML += '<div class="sign" style="left:' + (lounge.x + lounge.w / 2) * PX + 'px;top:' + (lounge.y + 50) * PX + 'px">' + esc(opts.emptySign) + '</div>';
@@ -352,7 +377,6 @@ export function createOffice(root, opts = {}) {
 
   /* ---------- loop ---------- */
   let T = 0, run = false, prev = 0, last = 0, raf = 0;
-  if (LM.length) T = Math.max(0, LM.length - 1) * SL + 300 + FL * .5; // start mid-flight on the latest message
   function frame(now) { if (!run || dead) return; raf = requestAnimationFrame(frame); if (now - last < 38) return; const dt = prev ? Math.min(now - prev, 120) : 0; prev = last = now; T += dt; draw(T); }
   function start() { if (dead) return; if (RM || run || document.hidden) { draw(T); return; } run = true; prev = 0; raf = requestAnimationFrame(frame); }
   function stop() { run = false; cancelAnimationFrame(raf); }
@@ -365,13 +389,18 @@ export function createOffice(root, opts = {}) {
   function select(id) { SEL = id && M.BY[id] ? id : ''; renderTasks(); if (SEL) showHov(SEL); else hideHov(); }
   function setData(D) {
     const prevKeys = new Set(M.msgs.map(m => m.key)), prevLayout = M.bots.map(b => b.id + ':' + b.act + (b.revoked ? 'R' : '')).join(',') + '|' + (M.chief && M.chief.id);
-    M = model(D); M.bots.forEach(dress); LM = loopMsgs();
+    M = model(D); M.bots.forEach(dress);
     if (SEL && !M.BY[SEL]) SEL = '';
     renderHud(); renderTasks(); renderLog();
     const nowLayout = M.bots.map(b => b.id + ':' + b.act + (b.revoked ? 'R' : '')).join(',') + '|' + (M.chief && M.chief.id);
     if (nowLayout !== prevLayout) relayout(true); else placeDesks();
-    const fresh = LM.findIndex(m => !prevKeys.has(m.key));
-    if (fresh >= 0 && !RM) { const i = LM.length - 1; T = Math.floor(T / loopLen()) * loopLen() + i * SL; } // fly the newest message now
+    // Fly ONLY messages that arrived while this page is open (realtime INSERT / mock sim). Never replay history.
+    const fresh = M.msgs.filter(m => !prevKeys.has(m.key));
+    if (fresh.length && !RM) { LM = [fresh[fresh.length - 1]]; flightT0 = T; curMsg = -2; }
+    else if (LM.length && !M.msgs.some(m => m.key === LM[0].key)) {
+      // Run reset / retention dropped the in-flight message — abort plane + bubble.
+      LM = []; curMsg = -2; const bub = q('#mbub'); if (bub) bub.hidden = true;
+    }
     draw(T);
   }
   renderHud(); renderTasks(); renderLog(); relayout(true); start();

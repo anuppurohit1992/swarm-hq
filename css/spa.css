@@ -131,3 +131,18 @@ tr.rvkrow .kpre{opacity:.6;text-decoration:line-through}
 .startbox .pt{margin:0 0 6px}
 .newws{display:flex;gap:10px;align-items:flex-end;margin:16px 0 8px;flex-wrap:wrap}
 .newws .fld{flex:1;min-width:200px}
+
+/* Idle snooze: big, animated, readable on 390px mobile as well as desktop */
+.desk .zzz{position:absolute;top:2px;right:2px;display:flex;gap:1px;align-items:flex-end;pointer-events:none;z-index:2;line-height:1;filter:drop-shadow(0 1px 0 #0b0e14) drop-shadow(0 0 4px rgba(180,200,255,.45))}
+.desk .zzz i{font-style:normal;font-weight:900;color:#d7e0f7;font-size:11px;letter-spacing:-.02em;animation:zzzup 2s ease-in-out infinite;opacity:.95}
+.desk .zzz i:nth-child(2){font-size:13px;animation-delay:.25s}
+.desk .zzz i:nth-child(3){font-size:16px;animation-delay:.5s}
+.desk.chief .zzz,.desk .plate.chief ~ .zzz{top:4px;right:6px}
+@keyframes zzzup{0%,100%{transform:translateY(2px);opacity:.55}40%{transform:translateY(-6px);opacity:1}70%{transform:translateY(-3px);opacity:.85}}
+@media (max-width:760px){
+  .desk .zzz{top:0;right:0}
+  .desk .zzz i{font-size:13px}
+  .desk .zzz i:nth-child(2){font-size:16px}
+  .desk .zzz i:nth-child(3){font-size:19px}
+}
+@media (prefers-reduced-motion:reduce){.desk .zzz i{animation:none}}

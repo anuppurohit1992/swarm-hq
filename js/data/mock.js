@@ -16,8 +16,8 @@ export function create() {
   const user = { id: 'mock-user-0001', email: 'you@example.com', name: 'Demo user' };
   const db = {
     workspaces: [
-      { id: 'ws-demo', slug: 'demo-hq', name: 'Demo HQ', owner_id: user.id, share_enabled: false, share_token: null, created_at: new Date(now - 864e5 * 3).toISOString() },
-      { id: 'ws-empty', slug: 'my-office', name: 'My office', owner_id: user.id, share_enabled: false, share_token: null, created_at: new Date(now).toISOString() },
+      { id: 'ws-demo', slug: 'demo-hq', name: 'Demo HQ', owner_id: user.id, share_enabled: false, share_token: null, created_at: new Date(now - 864e5 * 3).toISOString(), run_started_at: new Date(now - 2 * 3600e3).toISOString() },
+      { id: 'ws-empty', slug: 'my-office', name: 'My office', owner_id: user.id, share_enabled: false, share_token: null, created_at: new Date(now).toISOString(), run_started_at: null },
     ],
     members: [
       { workspace_id: 'ws-demo', user_id: user.id, email: user.email, role: 'owner', invited_at: null, accepted_at: new Date(now - 864e5 * 3).toISOString() },
@@ -30,6 +30,27 @@ export function create() {
   const authCbs = new Set(), subs = new Map(); let msgId = 1000;
   const emitAuth = () => authCbs.forEach(cb => cb(signedIn ? user : null));
   function emit(wsId, table, eventType, n, o) { (subs.get(wsId) || new Set()).forEach(s => s.onEvent({ table, eventType, new: n, old: o })); }
+  /** Like bot_report new_run: clear messages, bump run_started_at, then callers emit the new activity/message. */
+  function maybeStartRun(wsId, nextActivity) {
+    if (!nextActivity || nextActivity === 'idle') return false;
+    const R = db.rows[wsId], w = ws(wsId);
+    const awake = (R.bots || []).filter(b => !b.revoked_at);
+    if (!awake.length || awake.some(b => b.activity && b.activity !== 'idle')) return false;
+    for (const m of R.messages.splice(0)) emit(wsId, 'messages', 'DELETE', null, { id: m.id });
+    w.run_started_at = new Date().toISOString();
+    emit(wsId, 'workspaces', 'UPDATE', { id: w.id, run_started_at: w.run_started_at });
+    return true;
+  }
+  function snapshotRows(wsId) {
+    const R = db.rows[wsId], w = ws(wsId);
+    const cut = Date.now() - 24 * 864e5;
+    const runCut = w.run_started_at ? Date.parse(w.run_started_at) : 0;
+    const messages = (R.messages || []).filter(m => {
+      const t = Date.parse(m.created_at);
+      return t >= cut && (!runCut || t >= runCut);
+    });
+    return JSON.parse(JSON.stringify({ bots: R.bots, missions: R.missions, tasks: R.tasks, messages, run_started_at: w.run_started_at || null }));
+  }
   function ws(id) { const w = db.workspaces.find(x => x.id === id); if (!w) throw new Error('Workspace not found'); return w; }
   function requireOwner(id) { if (!signedIn || ws(id).owner_id !== user.id) throw new Error('Only the workspace owner can do that'); }
   function rpcGetShareToken({ p_workspace_id }) { requireOwner(p_workspace_id); const w = ws(p_workspace_id); return { enabled: w.share_enabled, token: w.share_token }; }
@@ -47,7 +68,9 @@ export function create() {
     } else if (r < .55) {
       const b = R.bots[1 + Math.floor(Math.random() * (R.bots.length - 1))] || R.bots[0]; if (b.revoked_at) return;
       const acts = ['typing', 'browsing', 'reading', 'waiting', 'idle', 'idle'];
-      b.activity = acts[Math.floor(Math.random() * acts.length)]; const d = SIM_DOING[b.slug]; b.doing = b.activity === 'idle' ? '' : (d ? d[Math.floor(Math.random() * d.length)] : 'Working'); b.last_heartbeat = t;
+      const next = acts[Math.floor(Math.random() * acts.length)];
+      maybeStartRun('ws-demo', next);
+      b.activity = next; const d = SIM_DOING[b.slug]; b.doing = b.activity === 'idle' ? '' : (d ? d[Math.floor(Math.random() * d.length)] : 'Working'); b.last_heartbeat = t;
       emit('ws-demo', 'bots', 'UPDATE', { ...b });
     } else {
       const open = R.tasks.filter(x => x.status !== 'done' && R.bots.some(b => b.slug === x.owner_bot && !b.revoked_at)); if (!open.length) return;
@@ -77,13 +100,13 @@ export function create() {
     async acceptInvites() { return 0; },
     async createWorkspace(name) {
       const id = 'ws-' + randHex(4), base = slugify(name) || 'office'; let slug = slugWithSuffix(base); while (db.workspaces.some(w => w.slug === slug)) slug = slugWithSuffix(base);
-      const w = { id, slug, name, owner_id: user.id, share_enabled: false, share_token: null, created_at: new Date().toISOString() };
+      const w = { id, slug, name, owner_id: user.id, share_enabled: false, share_token: null, created_at: new Date().toISOString(), run_started_at: null };
       db.workspaces.push(w); db.members.push({ workspace_id: id, user_id: user.id, email: user.email, role: 'owner', invited_at: null, accepted_at: w.created_at });
       db.rows[id] = { bots: [], missions: [], tasks: [], messages: [] }; return { ...w, role: 'owner' };
     },
     async renameWorkspace(id, name) { requireOwner(id); ws(id).name = name; return { ...ws(id) }; },
     async deleteWorkspace(id, confirmName) { requireOwner(id); if (confirmName !== ws(id).name) throw new Error('The name doesn\'t match; nothing was deleted'); db.workspaces = db.workspaces.filter(w => w.id !== id); db.members = db.members.filter(m => m.workspace_id !== id); delete db.rows[id]; },
-    async loadRows(wsId) { await sleep(120); const R = db.rows[wsId]; if (!R) throw new Error('Workspace not found'); return JSON.parse(JSON.stringify(R)); },
+    async loadRows(wsId) { await sleep(120); if (!db.rows[wsId]) throw new Error('Workspace not found'); return snapshotRows(wsId); },
     subscribe(wsId, { onEvent, onStatus, onResync }) {
       const s = { onEvent, onStatus, onResync }; if (!subs.has(wsId)) subs.set(wsId, new Set()); subs.get(wsId).add(s);
       onStatus && onStatus('connecting'); setTimeout(() => onStatus && onStatus('mock'), 300);
@@ -106,7 +129,7 @@ export function create() {
     async loadShared(slug, token) {
       await sleep(120); const w = token ? db.workspaces.find(x => x.share_enabled && x.share_token === token) : null; // like get_shared_workspace(p_token): the token alone identifies the workspace
       if (!w || !w.share_enabled || !token || token !== w.share_token) throw new Error('This read-only link is off or no longer valid.');
-      return { workspace: { name: w.name, slug: w.slug }, rows: JSON.parse(JSON.stringify(db.rows[w.id])) };
+      return { workspace: { name: w.name, slug: w.slug, run_started_at: w.run_started_at || null }, rows: snapshotRows(w.id) };
     },
 
     async createBot(wsId, { slug, name, role, emoji }) {
@@ -116,7 +139,7 @@ export function create() {
       const b = { id: 'bot-' + randHex(6), workspace_id: wsId, slug, name: name || slug, role: role || '', emoji: emoji || '🤖', activity: 'idle', doing: '', last_heartbeat: null, key_prefix: api_key.slice(0, 12), revoked_at: null, created_at: t };
       R.bots.push(b); emit(wsId, 'bots', 'INSERT', { ...b });
       // Simulate the bot's first report a few seconds later, so the desk lights up like it would for real.
-      setTimeout(() => { const x = R.bots.find(y => y.id === b.id); if (!x || x.revoked_at) return; x.activity = 'typing'; x.doing = 'Hello from mock mode: first report received'; x.last_heartbeat = new Date().toISOString(); emit(wsId, 'bots', 'UPDATE', { ...x }); }, 5000);
+      setTimeout(() => { const x = R.bots.find(y => y.id === b.id); if (!x || x.revoked_at) return; maybeStartRun(wsId, 'typing'); x.activity = 'typing'; x.doing = 'Hello from mock mode: first report received'; x.last_heartbeat = new Date().toISOString(); emit(wsId, 'bots', 'UPDATE', { ...x }); }, 5000);
       return { bot: { ...b }, api_key };
     },
     async rotateBotKey(botId) { const b = findBot(botId); requireOwner(b.workspace_id); const api_key = newKey(); b.key_prefix = api_key.slice(0, 12); b.revoked_at = null; emit(b.workspace_id, 'bots', 'UPDATE', { ...b }); return { api_key, key_prefix: b.key_prefix }; },

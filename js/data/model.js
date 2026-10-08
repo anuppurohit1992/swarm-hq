@@ -18,20 +18,52 @@ export function toStatus(rows) {
   return { updated, bots, missions, tasks, messages };
 }
 
-const RETAIN_MS = 7 * 864e5;
+/** Comms log retention: 24 h or current run start, whichever is later. */
+export const RETAIN_MS = 24 * 864e5;
+
 /** Live copy of one workspace's rows. apply() takes a Supabase postgres_changes-style payload. */
 export class WorkspaceRows {
   constructor(rows) { this.set(rows); }
   set(rows) {
     this.rows = { bots: [...(rows.bots || [])], missions: [...(rows.missions || [])], tasks: [...(rows.tasks || [])], messages: [...(rows.messages || [])] };
+    this.runStartedAt = rows.run_started_at || null;
     this.prune();
   }
-  prune() { const cut = Date.now() - RETAIN_MS; this.rows.messages = this.rows.messages.filter(m => !(Date.parse(m.created_at) < cut)).slice(-500); }
+  /** Drop messages older than 24h or before run_started_at. Returns true if anything changed. */
+  prune() {
+    const cut24 = Date.now() - RETAIN_MS;
+    const runCut = this.runStartedAt ? Date.parse(this.runStartedAt) : NaN;
+    const before = this.rows.messages.length;
+    this.rows.messages = this.rows.messages.filter(m => {
+      const t = Date.parse(m.created_at);
+      if (!(t >= cut24)) return false;
+      if (!isNaN(runCut) && t < runCut) return false;
+      return true;
+    }).slice(-500);
+    return this.rows.messages.length !== before;
+  }
+  /** New run: keep only messages at/after this timestamp. */
+  applyRunStarted(ts) {
+    if (!ts) return false;
+    if (this.runStartedAt && !(Date.parse(ts) > Date.parse(this.runStartedAt))) return false;
+    this.runStartedAt = ts;
+    this.prune();
+    return true;
+  }
   apply({ table, eventType, new: n, old: o }) {
+    if (table === 'workspaces') {
+      if (eventType === 'UPDATE' && n && n.run_started_at) return this.applyRunStarted(n.run_started_at);
+      return false;
+    }
     const list = this.rows[table]; if (!list) return false;
-    if (eventType === 'DELETE') { const id = o && o.id; const i = list.findIndex(r => r.id === id); if (i >= 0) { list.splice(i, 1); return true; } return false; }
+    if (eventType === 'DELETE') {
+      const id = o && o.id; if (id == null) return false;
+      const i = list.findIndex(r => r.id === id || String(r.id) === String(id));
+      if (i >= 0) { list.splice(i, 1); return true; }
+      return false; // unknown id → other workspace (or already gone)
+    }
     if (!n) return false;
-    const i = list.findIndex(r => r.id === n.id);
+    const i = list.findIndex(r => r.id === n.id || String(r.id) === String(n.id));
     if (i >= 0) list[i] = { ...list[i], ...n }; else list.push(n);
     if (table === 'messages') { list.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))); this.prune(); }
     return true;
