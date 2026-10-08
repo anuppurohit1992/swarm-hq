@@ -16,7 +16,7 @@ One channel per open workspace, `postgres_changes` (`*`) on `bots`, `tasks`, `mi
 ## RPCs called (supabase.rpc)
 | UI action | Call | Returns (used fields) |
 |---|---|---|
-| after sign-in | `accept_pending_invites()` | int |
+| after every sign-in / app load with a session | `accept_pending_invites()` | int |
 | first sign-in / New workspace | `create_workspace(p_name text, p_slug text)` | uuid |
 | Save workspace name | `update_workspace(p_workspace_id uuid, p_name text)` | void |
 | Delete workspace (typed name) | `delete_workspace(p_workspace_id uuid, p_confirm_name text)` | void |
@@ -24,10 +24,10 @@ One channel per open workspace, `postgres_changes` (`*`) on `bots`, `tasks`, `mi
 | Rotate | `rotate_bot_key(p_bot_id uuid)` | `{bot_id, key, key_prefix}` |
 | Revoke | `revoke_bot_key(p_bot_id uuid)` | void |
 | Remove bot | `remove_bot(p_bot_id uuid)` | void |
-| Invite | `invite_member(p_workspace_id uuid, p_email text, p_role text = 'viewer')` | `{email, role, invited_at, accepted_at}` |
+| Invite | `invite_member(p_workspace_id uuid, p_email text, p_role text = 'viewer')` | `{email, role, invited_at, accepted_at}`. Sends no email: Settings shows a 'Copy invite link' hint (site URL) |
 | Remove member | `remove_member(p_workspace_id uuid, p_email text)` | void |
 | Read-only link toggle / Reset link | `set_share_link(p_workspace_id uuid, p_enabled bool, p_regenerate bool)` | `{enabled, token}` |
-| Open `#/w/<slug>/view?k=<token>` | `get_shared_workspace(p_token text)` (anon) | `{workspace, bots, missions, tasks, messages}`; polled every 15 s |
+| Open `#/w/<slug>/view?k=<token>` or `#share=<token>` | `get_shared_workspace(p_token text)` (anon) | `{workspace, bots, missions, tasks, messages}`; polled every 15 s |
 
 Errors raised as `swarm:<status>:<code>` are mapped to friendly messages.
 

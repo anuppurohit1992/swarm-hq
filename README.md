@@ -16,12 +16,13 @@ Backend: Supabase (Postgres + Auth + Realtime + the `report` edge function).
 | `#/w/<slug>` | Live office: HUD with LIVE / connection state, pixel office, comms log, missions. Tap a desk to open the bot drawer **and** filter missions to that bot |
 | `#/w/<slug>` (no bots) | Empty-office onboarding: "Add your first bot" opens the create dialog, which shows the key once |
 | `#/w/<slug>/settings` | Owner only: workspace name, members & invites, read-only link (off by default), bots & keys (prefix, Rotate, Revoke, Remove), report snippet, delete workspace |
-| `#/w/<slug>/view?k=<token>` | Read-only share link (only works while the owner has it turned on) |
+| `#/w/<slug>/view?k=<token>` (alias `#share=<token>`) | Read-only share link (only works while the owner has it turned on) |
 
 ## Configuration (`config.js`)
 
-`config.js` holds **public** values only. With `SUPABASE_URL` / `SUPABASE_ANON_KEY` empty the app runs in **mock mode**
-(fictional data, simulated updates, nothing saved). `?mock=1` forces mock mode at any time.
+`config.js` holds **public** values only (project URL, anon key, OAuth flags). It points at the live Supabase project, so the
+site runs against real data by default. `?mock=1` (or empty `SUPABASE_URL` / `SUPABASE_ANON_KEY`) switches to **mock mode**:
+fictional data, simulated updates, nothing saved. The landing page and `#/demo` always use the fictional demo office.
 
 ```js
 window.SWARM_CONFIG = {

@@ -18,7 +18,7 @@ function snippet(kind, url) {
 function plainSnippet(kind, url) { const d = document.createElement('div'); d.innerHTML = snippet(kind, url); return d.textContent; }
 
 export async function renderSettings(el, { backend, workspace, headerHtml, wire, openAdd, onDeleted }) {
-  const ws = workspace; let rows = null, members = [], share = { share_enabled: false, share_token: null }, tab = 'curl', busy = false, rotated = '';
+  const ws = workspace; let rows = null, members = [], share = { share_enabled: false, share_token: null }, tab = 'curl', busy = false, rotated = '', lastInvite = '';
   el.innerHTML = '<div class="wrap">' + headerHtml() + '<p class="empty loading">Loading settings…</p></div>';
   const unwire = wire ? wire(el) : null;
   try {
@@ -61,7 +61,8 @@ export async function renderSettings(el, { backend, workspace, headerHtml, wire,
       '<p class="hint">Address <span class="mono">' + esc(addr) + '</span> · hosted on GitHub Pages</p>' +
       '<div class="rorow"><span class="roi" aria-hidden="true">' + ICON.lock + '</span><div><b>Message history</b><p class="hint">Kept for 7 days. Older comms log messages are deleted automatically.</p></div><span class="chip s-mute">7 days</span></div></section>' +
       '<section class="panel card" id="share"><div class="ch"><h3>Members &amp; sharing</h3></div><form id="invform" novalidate><label class="fld"><span>Invite by email</span><span class="inrow"><input name="email" type="email" placeholder="name@example.com" aria-label="Email to invite" autocomplete="off" required><span class="sel2" aria-label="Role">Viewer</span><button class="btn pri" type="submit">Invite</button></span></label></form>' +
-      '<p class="hint">Invitees must sign in with that email to view (no email is sent; share the site link with them). Viewers can watch the office, tasks and comms log but can\'t change anything.</p><ul class="mem">' + memberList() + '</ul>' +
+      '<p class="hint">Invitees must sign in with that email to view. No email is sent; share the site link with them. Viewers can watch the office, tasks and comms log but can\'t change anything.</p><ul class="mem">' + memberList() + '</ul>' +
+      (lastInvite ? '<div class="keynote invnote" role="status"><span class="roi" aria-hidden="true">' + ICON.mail + '</span><p><b>Invite saved. No email is sent.</b> Send <span class="mono">' + esc(siteUrl()) + '</span> to ' + esc(lastInvite) + ' and ask them to sign in with that email; they\'ll see this workspace after signing in.</p><button class="btn xs" type="button" id="copyinv">' + ICON.copy + 'Copy invite link</button></div>' : '') +
       '<div class="linkoff"><div class="ch"><div><b>Read-only link</b><p class="hint">' + (share.share_enabled ? 'On: anyone with this link can watch the office without signing in. Turning it off invalidates the link.' : 'If turned on, anyone with the link could view the office without signing in.') + '</p></div>' +
       '<button class="tog" type="button" role="switch" aria-checked="' + !!share.share_enabled + '" id="sharetog" aria-label="Read-only link"><span class="sw' + (share.share_enabled ? ' on' : '') + '" aria-hidden="true"><i></i></span>' + (share.share_enabled ? 'On' : 'Off') + '</button></div>' +
       '<span class="inrow' + (share.share_enabled ? '' : ' dis') + '"><input class="mono" readonly ' + (share.share_enabled ? '' : 'disabled ') + 'value="' + esc(shareUrl()) + '" aria-label="Read-only link"><button class="btn" type="button" id="copylink"' + (share.share_enabled ? '' : ' disabled') + '>' + ICON.copy + 'Copy link</button>' +
@@ -94,6 +95,7 @@ export async function renderSettings(el, { backend, workspace, headerHtml, wire,
     if (t.dataset.tab) { tab = t.dataset.tab; render(); return; }
     if (t.id === 'copysnip') { copyText(plainSnippet(tab, reportUrl())).then(ok => toast(ok ? 'Snippet copied' : 'Copy failed')); return; }
     if (t.id === 'addbot') { addBot(); return; }
+    if (t.id === 'copyinv') { copyText(siteUrl()).then(ok => toast(ok ? 'Invite link copied' : 'Copy failed')); return; }
     if (t.id === 'copylink') { copyText(shareUrl()).then(ok => toast(ok ? 'Link copied' : 'Copy failed')); return; }
     if (t.id === 'sharetog') { const on = !share.share_enabled; act(async () => { share = await backend.setShareLink(ws.id, on); render(); }, on ? 'Read-only link turned on' : 'Read-only link turned off'); return; }
     if (t.id === 'resetlink') { if (!confirm('Reset the read-only link? The old link stops working.')) return; act(async () => { share = await backend.setShareLink(ws.id, true, true); render(); }, 'New link created'); return; }
@@ -113,7 +115,7 @@ export async function renderSettings(el, { backend, workspace, headerHtml, wire,
     if (f.id === 'wsform') { const name = f.name.value.trim(); if (!name) return; act(async () => { await backend.renameWorkspace(ws.id, name); ws.name = name; render(); }, 'Workspace renamed'); }
     if (f.id === 'invform') {
       const email = f.email.value.trim().toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Enter a valid email address', 'err'); return; }
-      act(async () => { await backend.inviteViewer(ws.id, email); members = await backend.listMembers(ws.id); render(); }, 'Invited ' + email);
+      act(async () => { await backend.inviteViewer(ws.id, email); lastInvite = email; members = await backend.listMembers(ws.id); render(); }, 'Invited ' + email);
     }
   };
   const onInput = e => { if (e.target.id === 'delname') el.querySelector('#delws').disabled = e.target.value.trim() !== ws.name; };

@@ -13,6 +13,7 @@ let backend, user = null, cleanup = null, seq = 0, workspaces = null, authNotice
 function parse() {
   const h = location.hash.replace(/^#/, '');
   if (/(^|&)(access_token|error_description|error)=/.test(h)) return { name: 'auth' };
+  const sh = /^share=([A-Za-z0-9]+)/.exec(h); if (sh) return { name: 'shared', slug: '', token: sh[1] }; // README alias: #share=<token>
   const [path, query = ''] = h.split('?'); const parts = path.split('/').filter(Boolean).map(decodeURIComponent); const q = new URLSearchParams(query);
   if (!parts.length) return { name: 'home' };
   if (parts[0] === 'signin') return { name: 'signin' };
@@ -59,7 +60,7 @@ async function route() {
       let info = null;
       const load = async () => { const d = await backend.loadShared(r.slug, r.token); info = d.workspace; return d.rows; };
       return done(await renderOfficeView(app, {
-        headerHtml: conn => appHeader({ user, current: info || { name: r.slug, slug: r.slug }, conn, readOnlyLabel: 'read-only link', signInLink: !user }), wire,
+        headerHtml: conn => appHeader({ user, current: info || { name: r.slug || 'Shared office', slug: r.slug }, conn, readOnlyLabel: 'read-only link', signInLink: !user }), wire,
         source: { loadRows: load, pollMs: 15000 }, connKind: 'shared', workspace: { name: r.slug, slug: r.slug }, isOwner: false,
       }));
     }
@@ -99,7 +100,8 @@ async function boot() {
   }
   backend = await getBackend();
   user = await backend.getUser();
-  backend.onAuth(u => { const was = user && user.id; user = u; workspaces = null; if ((u && u.id) !== was) route(); });
+  if (user) await backend.acceptInvites(); // after every sign-in / app load
+  backend.onAuth(async u => { const was = user && user.id; user = u; workspaces = null; if ((u && u.id) !== was) { if (u) await backend.acceptInvites(); route(); } });
   addEventListener('hashchange', route);
   route();
 }

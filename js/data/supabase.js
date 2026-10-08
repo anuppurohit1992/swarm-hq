@@ -1,6 +1,6 @@
 /* SUPABASE backend. Uses the vendored, pinned supabase-js UMD build (vendor/supabase-js-2.117.3).
    Server-side contract (tables, RLS, RPCs) is documented in BACKEND.md. Only the public anon key is used here. */
-import { siteUrl } from './index.js';
+import { authRedirectUrl } from './index.js';
 import { slugify } from '../util.js';
 
 const SB_SRC = new URL('../../vendor/supabase-js-2.117.3/supabase.js', import.meta.url).href;
@@ -43,10 +43,10 @@ export async function create(cfg) {
     async getUser() { return user; },
     onAuth(cb) { authCbs.add(cb); return () => authCbs.delete(cb); },
     async signInWithEmail(email) {
-      chk(await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: siteUrl(), shouldCreateUser: true } }));
+      chk(await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: authRedirectUrl(), shouldCreateUser: true } }));
       return { instant: false, message: 'Check your inbox: we sent a sign-in link to ' + email + '.' };
     },
-    async signInWithOAuth(provider) { chk(await sb.auth.signInWithOAuth({ provider, options: { redirectTo: siteUrl() } })); },
+    async signInWithOAuth(provider) { chk(await sb.auth.signInWithOAuth({ provider, options: { redirectTo: authRedirectUrl() } })); },
     async signOut() { await sb.auth.signOut(); },
 
     async listWorkspaces() {
@@ -54,8 +54,9 @@ export async function create(cfg) {
       const rows = chk(await sb.from('workspaces').select(WS_COLS).order('created_at'));
       return rows.map(w => ({ ...w, role: w.owner_id === user.id ? 'owner' : 'viewer' }));
     },
+    /** Must run after every sign-in / app load: links pending invites for this email. */
+    async acceptInvites() { try { return chk(await sb.rpc('accept_pending_invites')); } catch (e) { console.warn('accept_pending_invites failed:', e.message); return 0; } },
     async ensureWorkspace() {
-      try { chk(await sb.rpc('accept_pending_invites')); } catch (e) { console.warn('accept_pending_invites failed:', e.message); }
       const l = await this.listWorkspaces(); return l[0] || this.createWorkspace('My office');
     },
     async createWorkspace(name) {

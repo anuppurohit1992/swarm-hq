@@ -4,7 +4,10 @@ const CFG = window.SWARM_CONFIG || {};
 const qs = new URLSearchParams(location.search);
 export const MOCK = qs.get('mock') === '1' || !CFG.SUPABASE_URL || !CFG.SUPABASE_ANON_KEY;
 export const CONFIG = CFG;
+/** Public address used in links shown to people (share link, invite link). */
 export function siteUrl() { return CFG.SITE_URL || (location.origin + location.pathname); }
+/** Where magic links / OAuth return to: this page (Pages URL in production; localhost is allow-listed too). */
+export function authRedirectUrl() { return location.origin + location.pathname; }
 export function reportUrl() {
   return CFG.SUPABASE_URL ? CFG.SUPABASE_URL.replace(/\/+$/, '') + '/functions/v1/report' : 'https://<project>.supabase.co/functions/v1/report';
 }

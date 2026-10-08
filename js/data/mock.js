@@ -73,6 +73,7 @@ export function create() {
       return db.workspaces.filter(w => db.members.some(m => m.workspace_id === w.id && m.user_id === user.id))
         .map(w => ({ ...w, role: w.owner_id === user.id ? 'owner' : 'viewer' }));
     },
+    async acceptInvites() { return 0; },
     async ensureWorkspace() { const l = await this.listWorkspaces(); return l[0] || this.createWorkspace('My office'); },
     async createWorkspace(name) {
       const id = 'ws-' + randHex(4), base = slugify(name) || 'office'; let slug = base, n = 2; while (db.workspaces.some(w => w.slug === slug)) slug = base + '-' + n++;
