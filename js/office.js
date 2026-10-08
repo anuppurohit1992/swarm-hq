@@ -1,0 +1,383 @@
+/* Pixel-office engine. ES-module port of the approved dashboard renderer (template.html / proposal office.js)
+   that can be re-fed with live data. Data shape = status.json:
+   {updated, bots:[{id,name,role,emoji,activity,doing,last_heartbeat}], missions:[{id,name,tasks:[taskId]}],
+    tasks:[{id,title,owner,helpers,status,progress,due,note}], messages:[{id?,time,from,to,text}]}
+   Markup it expects inside `root` (any missing element is ignored):
+   #hud #stage>#cv,#ov,#mbub,#hbub  #legend  #log #logn  #quests #sel #reset */
+import { str, esc, hash, ACTS, TZ_LABEL, hhmm as hhmmTs, fmt, todayLocal, dateTime } from './util.js';
+
+function arr(x) { return Array.isArray(x) ? x.filter(v => v && typeof v === 'object') : []; }
+function human(s) { s = str(s).replace(/[_-]+/g, ' ').trim(); return s ? s[0].toUpperCase() + s.slice(1) : ''; }
+function trunc(s, n) { return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; }
+const TS = { done: ['Done', 'ok'], in_progress: ['In progress', 'run'], waiting: ['Waiting', 'wait'], blocked: ['Blocked', 'bad'], idle: ['Idle', 'mute'], unknown: ['No status', 'mute'] };
+export function tst(s) { return TS[s] || [human(s) || 'Unknown', 'mute']; }
+export function isDone(t) { return t.status === 'done'; }
+export function involves(t, id) { return t.owner === id || t.helpers.indexOf(id) >= 0; }
+function avg(l) { return l.length ? Math.round(l.reduce((a, t) => a + t.progress, 0) / l.length) : 0; }
+function addDay(y, n) { const d = new Date(y + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+export function dueInfo(t) {
+  if (!t.due) return null;
+  const today = todayLocal();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t.due) || isNaN(Date.parse(t.due + 'T00:00:00Z'))) return { txt: 'Due ' + t.due, c: '' };
+  const o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (t.due.slice(0, 4) !== today.slice(0, 4)) o.year = 'numeric';
+  const l = new Date(t.due + 'T00:00:00Z').toLocaleDateString('en-GB', o);
+  if (isDone(t)) return { txt: 'Due ' + l, c: '' };
+  if (t.due < today) return { txt: 'Overdue · was due ' + l, c: 'late' };
+  if (t.due === today) return { txt: 'Due today', c: 'soon' };
+  if (t.due === addDay(today, 1)) return { txt: 'Due tomorrow', c: 'soon' };
+  return { txt: 'Due ' + l, c: '' };
+}
+
+/** Normalise a status.json-shaped object into the engine model. */
+export function model(D) {
+  D = D || {};
+  const bots = arr(D.bots).map((b, i) => {
+    const a = str(b.activity).trim().toLowerCase();
+    const revoked = !!b.revoked; // revoked key: desk dimmed, idle sprite, "Key revoked" badge
+    return { id: str(b.id) || 'bot-' + i, name: str(b.name) || str(b.id) || 'Unnamed bot', role: str(b.role), emoji: str(b.emoji) || '🤖',
+      act: revoked ? 'idle' : (ACTS[a] ? a : 'idle'), reported: ACTS[a] ? a : 'idle', revoked, doing: revoked ? '' : str(b.doing).trim(), hb: str(b.last_heartbeat), keyPrefix: str(b.key_prefix), uuid: str(b.uuid) };
+  });
+  const BY = {}; bots.forEach(b => { BY[b.id] = b; });
+  const chief = bots.find(b => !b.revoked && /chief of staff|coordinator/i.test(b.role)) || null;
+  const chiefLabel = chief && /chief of staff/i.test(chief.role) ? 'Chief of Staff' : 'Coordinator';
+  const tasks = arr(D.tasks).map((t, i) => {
+    const st = str(t.status).trim().toLowerCase().replace(/[\s-]+/g, '_') || 'unknown'; let p = Number(t.progress);
+    if (t.progress == null || t.progress === '' || !isFinite(p)) p = st === 'done' ? 100 : 0;
+    const o = str(t.owner);
+    return { id: str(t.id) || 'task-' + i, title: str(t.title) || str(t.id) || 'Untitled task', owner: o, status: st, progress: Math.round(Math.max(0, Math.min(100, p))),
+      due: str(t.due).trim().slice(0, 10), note: str(t.note).trim(),
+      helpers: Array.isArray(t.helpers) ? t.helpers.map(str).filter((h, j, a) => h && h !== o && a.indexOf(h) === j) : [] };
+  });
+  const TB = {}; tasks.forEach(t => { TB[t.id] = t; });
+  const missions = arr(D.missions).map((m, i) => {
+    const ids = Array.isArray(m.tasks) ? m.tasks.map(str) : [];
+    return { id: str(m.id) || 'm' + i, name: str(m.name) || str(m.id) || 'Untitled mission', tasks: ids.filter((id, j, a) => TB[id] && a.indexOf(id) === j).map(id => TB[id]) };
+  });
+  const inM = {}; missions.forEach(m => m.tasks.forEach(t => { inM[t.id] = 1; }));
+  const other = tasks.filter(t => !inM[t.id]);
+  if (other.length) missions.push({ id: '__other', name: 'Other', tasks: other, other: 1 });
+  const all = arr(D.messages).map((m, i) => ({ i, key: str(m.id) || (str(m.time) + '|' + i), ts: Date.parse(str(m.time)), time: str(m.time), from: str(m.from), to: str(m.to), text: str(m.text).trim() }));
+  const msgs = all.filter(m => BY[m.from] && BY[m.to] && m.from !== m.to);
+  msgs.sort((a, b) => { const x = isNaN(a.ts) ? Infinity : a.ts, y = isNaN(b.ts) ? Infinity : b.ts; return x === y ? a.i - b.i : x < y ? -1 : 1; });
+  return { bots, BY, chief, chiefLabel, tasks, missions, msgs, skipped: all.length - msgs.length, updated: str(D.updated) };
+}
+
+const P = { fl: ['#262b42', '#2a304a'], wall: '#343a5c', trim: '#222640', base: '#1a1d30', win: '#141e45', winHi: '#1c2c66', star: '#dfe6ff', frame: '#596089', desk: '#8b5e3c', deskHi: '#a8744b', deskFr: '#5c3b22', bez: '#14161f', off: '#0a0c15', chair: '#47508a', chairHi: '#5a64a3', chairD: '#2a3054', rug: '#3a2f62', rugB: '#5d4c96', sh: 'rgba(0,0,0,.3)', z: '#dfe6ff', lamp: 'rgba(255,214,140,.07)' };
+const HAIR = ['#2b1d14', '#5a3825', '#d8a65e', '#141414', '#8b4a2b', '#b9bccb', '#6b2f5f'], SKIN = ['#f2c9a5', '#dba77d', '#ab7349', '#7b4b2c'], SHIRT = ['#e5484d', '#3e8ef7', '#30a46c', '#f5a524', '#8e4ec6', '#12a594', '#e5689f', '#ef7a38'], PANTS = ['#2b3150', '#3b2f2a', '#203a4a', '#3a3a44'];
+const WALL = 34, CH = 62, CCH = 68, OL = '#151827', SL = 3600, FL = 1800, MAXLOOP = 10;
+const RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+function dress(b) { const h = hash(b.id); b.hair = HAIR[h % 7]; b.skin = SKIN[(h >>> 3) % 4]; b.shirt = SHIRT[(h >>> 5) % 8]; b.pants = PANTS[(h >>> 8) % 4]; b.seed = h; b.nap = (h >>> 11) % 2; return b; }
+
+/* Standalone sprite drawer for the bot drawer avatar. */
+export function drawSprite(canvas, b) {
+  canvas.width = 20; canvas.height = 24; const g = canvas.getContext('2d'); dress(b);
+  const R = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), w, h); };
+  const x = 6, top = 3;
+  R(x - 1, top + 18, 10, 1, P.sh); R(x, top + 13, 8, 5, OL); R(x + 1, top + 13, 2, 4, b.pants); R(x + 5, top + 13, 2, 3, b.pants); R(x + 1, top + 17, 2, 1, '#0c0e18'); R(x + 5, top + 16, 2, 1, '#0c0e18');
+  R(x - 3, top + 6, 14, 8, OL); R(x - 1, top + 7, 10, 6, b.shirt); R(x - 2, top + 8, 2, 4, b.shirt); R(x + 8, top + 9, 2, 4, b.shirt); R(x - 2, top + 12, 2, 1, b.skin); R(x + 8, top + 13, 2, 1, b.skin);
+  R(x - 1, top - 1, 10, 9, OL); R(x, top, 8, 7, b.skin); R(x, top, 8, 3, b.hair); R(x, top + 3, 1, 2, b.hair); R(x + 7, top + 3, 1, 2, b.hair); R(x + 2, top + 4, 1, 1, OL); R(x + 5, top + 4, 1, 1, OL); R(x + 3, top + 6, 2, 1, '#c0786a');
+}
+
+/**
+ * Mount an office into `root`.
+ * opts: { data, live:{state,label,text,sub}|null, vacant:n, emptyLegend, emptySign, onDesk(id), selectable:true, interactiveTasks:true }
+ */
+export function createOffice(root, opts = {}) {
+  const DUM = document.createElement('div');
+  const q = s => root.querySelector(s) || DUM;
+  let M = model(opts.data), SEL = '', hov = null, curMsg = -2, conn = opts.live || null;
+  M.bots.forEach(dress);
+  const cv = q('#cv'), ctx = cv.getContext ? cv.getContext('2d') : null, buf = document.createElement('canvas'), bx = buf.getContext('2d'), bg = document.createElement('canvas');
+  let g, W = 300, H = 200, S = 2, PX = 1, cells = [], pos = {}, lounge = null, dead = false;
+  function R(x, y, w, h, c) { g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), w, h); }
+  function bot(id) { id = str(id); return M.BY[id] || { id, name: id ? id + ' (removed)' : 'Unassigned', emoji: '❔', role: '' }; }
+  function loopMsgs() { return M.msgs.slice(-MAXLOOP); }
+  let LM = loopMsgs();
+
+  /* ---------- HUD ---------- */
+  function liveCell() {
+    if (!conn) return '<div class="st"><span class="k">Last updated</span><span class="v sm">' + esc(M.updated ? dateTime(M.updated) : 'Not set') + '</span></div>';
+    return '<div class="st live" id="conncell"><span class="k">Connection</span><span class="lv ' + esc(conn.state || '') + '"><i class="pulse"></i>' + esc(conn.label || 'LIVE') + '</span><span class="cs">' + esc(conn.text || '') + '</span><span class="hint">' + esc(conn.sub || '') + '</span></div>';
+  }
+  function renderHud() {
+    const cnt = { done: 0, in_progress: 0, waiting: 0 }; let oth = 0;
+    M.tasks.forEach(t => { if (Object.prototype.hasOwnProperty.call(cnt, t.status)) cnt[t.status]++; else oth++; });
+    const overall = avg(M.tasks), active = M.bots.filter(b => b.act !== 'idle').length, n = M.tasks.length;
+    q('#hud').innerHTML = '<div class="st"><span class="k">Overall progress</span><span class="v">' + (n ? overall + '%' : '—') + ' <small>' + (n ? 'avg of ' + n + ' task' + (n === 1 ? '' : 's') : 'no tasks yet') + '</small></span><div class="xp" role="progressbar" aria-label="Overall progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + overall + '"><i style="width:' + overall + '%"></i></div></div>' +
+      '<div class="st"><span class="k">Active bots</span><span class="v">' + active + '<small> / ' + M.bots.length + '</small></span></div>' +
+      '<div class="st"><span class="k">Done</span><span class="v c-ok">' + cnt.done + '</span></div>' +
+      '<div class="st"><span class="k">In progress</span><span class="v c-run">' + cnt.in_progress + '</span></div>' +
+      '<div class="st"><span class="k">Waiting</span><span class="v c-wait">' + cnt.waiting + (oth ? '<small> +' + oth + ' other</small>' : '') + '</span></div>' + liveCell();
+    const ac = {}; let rv = 0; M.bots.forEach(b => { if (b.revoked) rv++; else ac[b.act] = (ac[b.act] || 0) + 1; });
+    q('#legend').innerHTML = M.bots.length ? Object.keys(ACTS).filter(a => ac[a]).map(a => '<span><i class="a-' + a + '"></i>' + ac[a] + ' ' + ACTS[a].toLowerCase() + '</span>').join('') + (rv ? '<span><i class="rvk-i"></i>' + rv + ' key revoked</span>' : '') + '<span>· Tap a desk to see what a bot is doing</span>' : '<span>' + esc(opts.emptyLegend || 'No bots yet.') + '</span>';
+  }
+  function setConn(c) { conn = c; const el = root.querySelector('#conncell'); if (el) el.outerHTML = liveCell(); else renderHud(); }
+
+  /* ---------- missions panel ---------- */
+  function av(id, c, r) { const b = bot(id), l = r + ': ' + b.name; return '<span class="av ' + c + '" role="img" title="' + esc(l) + '" aria-label="' + esc(l) + '">' + esc(b.emoji) + '</span>'; }
+  function taskLi(t, ctx2) {
+    const s = tst(t.status), d = dueInfo(t);
+    const who = ctx2 ? (t.owner === ctx2 ? 'Owner' : 'Helping ' + esc(bot(t.owner).name)) : (t.owner ? esc(bot(t.owner).name) : '<span class="unas">Unassigned</span>') + (t.helpers.length ? ' + ' + t.helpers.length + ' helper' + (t.helpers.length > 1 ? 's' : '') : '');
+    return '<li class="task s-' + s[1] + (isDone(t) ? ' done' : '') + '"><div class="who">' + av(t.owner, 'lg', 'Owner') + (t.helpers.length ? '<span class="hl">' + t.helpers.map(x => av(x, 'sm', 'Helper')).join('') + '</span>' : '') + '</div>' +
+      '<div><div class="ttl">' + esc(t.title) + '</div><div class="row"><span class="chip s-' + s[1] + '">' + esc(s[0]) + '</span><span>' + who + '</span>' + (d ? '<span class="due ' + d.c + '">' + esc(d.txt) + '</span>' : '') + '</div>' +
+      '<div class="bar"><span role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + t.progress + '"><i style="width:' + t.progress + '%"></i></span><b class="mono">' + t.progress + '%</b></div>' +
+      (t.note ? '<p class="note">' + esc(t.note) + '</p>' : '') + '</div></li>';
+  }
+  function renderTasks() {
+    let h = '', n = 0;
+    M.missions.forEach(m => {
+      const l = SEL ? m.tasks.filter(t => involves(t, SEL)) : m.tasks;
+      if (SEL && !l.length) return; n += l.length;
+      const dn = m.tasks.filter(isDone).length;
+      h += '<section class="q"><div class="qh"><div><span class="qk">' + (m.other ? 'Unsorted' : 'Quest') + '</span><h3>' + esc(m.name) + '</h3></div><span class="qp mono">' + (m.tasks.length ? avg(m.tasks) + '%' : '—') + '</span><span class="qm">' + dn + ' of ' + m.tasks.length + ' done</span></div>' +
+        (l.length ? '<ul class="tasks">' + l.map(t => taskLi(t)).join('') + '</ul>' : '<p class="empty">No tasks in this mission yet.</p>') + '</section>';
+    });
+    if (!h) h = '<p class="empty">' + (SEL ? esc(bot(SEL).name) + ' has no assigned tasks right now.' : 'No missions or tasks yet.') + '</p>';
+    q('#quests').innerHTML = h;
+    q('#sel').innerHTML = SEL ? 'Showing ' + n + ' task' + (n === 1 ? '' : 's') + ' for <b>' + esc(bot(SEL).emoji + ' ' + bot(SEL).name) + '</b>' : 'All ' + M.tasks.length + ' task' + (M.tasks.length === 1 ? '' : 's');
+    q('#reset').hidden = !SEL;
+    root.querySelectorAll('#ov .desk').forEach(d => d.setAttribute('aria-pressed', String(d.getAttribute('data-bot') === SEL)));
+  }
+
+  /* ---------- comms log ---------- */
+  function renderLog() {
+    const L = q('#log'); const msgs = M.msgs;
+    L.innerHTML = msgs.length ? msgs.map(m => {
+      const f = bot(m.from), t = bot(m.to);
+      return '<li data-k="' + esc(m.key) + '"><time>' + hhmmTs(m.ts) + '</time><span class="ft"><b>' + esc(f.emoji + ' ' + f.name) + '</b> → <b>' + esc(t.emoji + ' ' + t.name) + '</b></span><span class="tx">' + esc(m.text) + '</span></li>';
+    }).join('') : '<li class="empty" style="display:block">No messages yet.</li>';
+    q('#logn').textContent = msgs.length ? msgs.length + ' message' + (msgs.length === 1 ? '' : 's') + ' · times ' + TZ_LABEL + (M.skipped ? ' · ' + M.skipped + ' skipped (unknown bot)' : '') : 'times ' + TZ_LABEL;
+    if (msgs.length && opts.logToEnd !== false) L.scrollTop = L.scrollHeight;
+    curMsg = -2;
+  }
+
+  /* ---------- office drawing (verbatim pixel art from the approved renderer) ---------- */
+  function partners(b) {
+    const s = []; const add = id => { if (id && id !== b.id && M.BY[id] && s.indexOf(id) < 0) s.push(id); };
+    M.tasks.forEach(t => { if (involves(t, b.id)) { add(t.owner); t.helpers.forEach(add); } });
+    M.msgs.forEach(m => { if (m.from === b.id) add(m.to); if (m.to === b.id) add(m.from); });
+    return s.slice(0, 4);
+  }
+  function vacants() { const V = []; for (let i = 0; i < (M.bots.length ? 0 : (opts.vacant || 0)); i++) V.push({ id: '__v' + i, name: '', role: '', emoji: '', act: 'idle', doing: '', vacant: 1, seed: hash('v' + i) }); return V; }
+  function layout() {
+    const stage = q('#stage'), par = stage.parentNode || DUM;
+    const cssW = (par.clientWidth - parseFloat(getComputedStyle(par).paddingLeft || 0) * 2) || 360, dpr = Math.max(1, window.devicePixelRatio || 1);
+    S = Math.max(1, Math.round(dpr * (cssW < 600 ? 1.5 : 2))); PX = S / dpr; W = Math.max(120, Math.floor(cssW / PX));
+    const cols = Math.max(2, Math.min(Math.floor(cssW / (cssW < 600 ? 118 : 136)), Math.floor((W - 8) / 58))), cw = Math.floor((W - 8) / cols), x0 = Math.floor((W - cols * cw) / 2);
+    let y = WALL + 4; cells = []; pos = {};
+    const chief = M.chief;
+    function add(b, x, yy, w, h, ch) {
+      const cx = x + (w >> 1), c = { b, x, y: yy, w, h, cx, ch, scr: ch ? [{ x: cx - 19, y: yy + 5 }, { x: cx + 3, y: yy + 5 }] : [{ x: cx - 8, y: yy + 5 }] };
+      c.home = { x: cx + 14, y: yy + 46, c }; c.visit = { x: cx - 15, y: yy + 46, c }; cells.push(c); pos[b.id] = c;
+    }
+    const oth = (M.bots.length ? M.bots : vacants()).filter(b => b !== chief), N = oth.length, RN = Math.ceil(N / cols), sz = []; let k = 0;
+    for (let i = 0; i < RN; i++) sz.push(Math.floor(N / RN) + (i < N % RN ? 1 : 0));
+    function rows(a, z) { for (let i = a; i < z; i++) { const r = oth.slice(k, k += sz[i]), sc = Math.floor((cols - r.length) / 2); r.forEach((b, j) => add(b, x0 + (sc + j) * cw, y, cw, CH, 0)); y += CH; } }
+    const tr = Math.ceil(RN / 2); rows(0, tr);
+    const lw = Math.min(Math.max(112, cw * 2), W - 56), lx = Math.floor((W - lw) / 2); lounge = { x: lx, y, w: lw };
+    if (chief) add(chief, lx, y, lw, CCH, 1); y += CCH;
+    rows(tr, RN); H = y + 6;
+    cells.forEach(c => { c.route = null; if (c.b.act === 'coordinating') { const ps = partners(c.b).map(id => pos[id]).filter(Boolean); if (ps.length) c.route = mkRoute(c, ps); } });
+    buf.width = bg.width = W; buf.height = bg.height = H; cv.width = W * S; cv.height = H * S;
+    stage.style.width = W * PX + 'px'; stage.style.height = H * PX + 'px'; cv.style.width = W * PX + 'px'; cv.style.height = H * PX + 'px';
+    drawBg(); placeDesks(); curMsg = -2;
+  }
+  function mkRoute(c, ps) {
+    const segs = []; let T = 0, cur = c.home;
+    const seg = (a, b, d) => { segs.push({ a, b, t0: T, d }); T += d; };
+    function go(to) {
+      const p = cur; const pts = Math.abs(p.y - to.y) < 2 ? [to] : (() => { const cc = p.c, gx = Math.abs(cc.x - to.x) < Math.abs(cc.x + cc.w - to.x) ? cc.x + 1 : cc.x + cc.w - 2; return [{ x: gx, y: p.y }, { x: gx, y: to.y }, to]; })();
+      pts.forEach(qq => { const d = Math.hypot(qq.x - cur.x, qq.y - cur.y) / 0.042; if (d > 0) seg(cur, qq, d); cur = qq; });
+    }
+    seg(cur, cur, 2400); ps.forEach(p => { go(p.visit); seg(cur, cur, 1500); }); go(c.home); return { segs, T };
+  }
+  function walkAt(c, t) { const r = c.route, tt = t % r.T; for (const s of r.segs) { if (tt < s.t0 + s.d) { const u = (tt - s.t0) / s.d; return { x: s.a.x + (s.b.x - s.a.x) * u, y: s.a.y + (s.b.y - s.a.y) * u, mv: s.a !== s.b, up: s.b.y < s.a.y - .5 }; } } return { x: c.home.x, y: c.home.y }; }
+  function plant(x, y, big) {
+    R(x + 1, y + (big ? 11 : 6), 8, big ? 7 : 5, '#b0643a'); R(x, y + (big ? 10 : 5), 10, 2, '#8f4f2c'); const L = '#3aa35c', Dk = '#257a40';
+    if (big) { R(x + 2, y, 6, 4, L); R(x, y + 3, 10, 5, L); R(x + 1, y + 7, 8, 3, Dk); R(x + 4, y + 1, 2, 8, Dk); } else { R(x + 2, y, 6, 3, L); R(x + 1, y + 2, 8, 3, Dk); }
+  }
+  function drawBg() {
+    g = bg.getContext('2d'); const chief = M.chief;
+    for (let y = WALL; y < H; y += 8) for (let x = 0; x < W; x += 8) R(x, y, 8, 8, P.fl[((x + y) >> 3) & 1]);
+    R(0, 0, W, WALL, P.wall); R(0, 0, W, 3, P.trim); R(0, WALL - 3, W, 3, P.base); R(0, WALL, W, 2, P.sh);
+    const nw = Math.max(1, Math.floor(W / 95));
+    for (let i = 0; i < nw; i++) {
+      const wx = Math.round((i + .5) * W / nw) - 14; R(wx - 2, 6, 32, 21, P.frame); R(wx, 8, 28, 17, P.win); R(wx, 8, 28, 7, P.winHi);
+      for (let k = 0; k < 5; k++) { const h = hash('s' + i + k); R(wx + 1 + h % 26, 9 + (h >> 5) % 15, 1, 1, P.star); }
+      if (i === nw - 1) { R(wx + 19, 10, 4, 4, '#f4f0d0'); R(wx + 21, 10, 2, 2, P.win); }
+      R(wx + 13, 8, 2, 17, P.frame); R(wx, 16, 28, 1, P.frame); R(wx - 3, 26, 34, 2, P.trim);
+    }
+    if (W > 220) { let kx = Math.round(W / nw) - 4; if (nw === 1) kx = W - 30; R(kx, 10, 9, 9, '#2a2d3a'); R(kx + 1, 11, 7, 7, '#f4f1e8'); R(kx + 4, 12, 1, 3, '#2a2d3a'); R(kx + 4, 14, 2, 1, '#2a2d3a'); }
+    plant(3, WALL - 12, 1); plant(W - 13, WALL - 12, 1);
+    const L = lounge;
+    if (L) {
+      const ly = L.y;
+      if (chief) { R(L.x + 4, ly + 2, L.w - 8, CCH - 8, P.rugB); R(L.x + 6, ly + 4, L.w - 12, CCH - 12, P.rug); for (let rx = L.x + 8; rx < L.x + L.w - 8; rx += 6) R(rx, ly + 4, 2, 1, P.rugB); }
+      else { R(L.x + L.w / 2 - 18, ly + 20, 36, 18, P.deskFr); R(L.x + L.w / 2 - 17, ly + 19, 34, 16, P.desk); }
+      const sp = L.x;
+      if (sp >= 22) {
+        const cx0 = Math.max(4, Math.round(sp / 2) - 7);
+        R(cx0, ly + 16, 14, 22, '#3b3f4d'); R(cx0 + 1, ly + 17, 12, 6, '#5b6070'); R(cx0 + 3, ly + 19, 8, 2, '#20232c'); R(cx0 + 10, ly + 18, 2, 2, '#e5484d'); R(cx0 + 4, ly + 26, 6, 7, '#20232c'); R(cx0 + 5, ly + 30, 4, 3, '#f4f0e6'); R(cx0, ly + 38, 14, 2, P.sh);
+        const wx2 = W - Math.round(sp / 2) - 5; R(wx2 + 1, ly + 12, 8, 9, '#8fd3ff'); R(wx2 + 2, ly + 13, 3, 6, '#c9ecff'); R(wx2, ly + 21, 10, 17, '#e9edf3'); R(wx2 + 2, ly + 25, 2, 2, '#3e8ef7'); R(wx2 + 6, ly + 25, 2, 2, '#e5484d'); R(wx2, ly + 38, 10, 2, P.sh);
+        if (sp >= 40) { plant(cx0 + 2, ly + 44, 0); plant(wx2, ly + 44, 0); }
+      }
+    }
+    cells.forEach(c => {
+      const x = c.cx, Y = c.y, dw = c.ch ? 68 : 42, dx = x - (dw >> 1);
+      R(dx + 2, Y + 34, dw, 3, P.sh); R(dx, Y + 16, dw, 13, P.desk); R(dx, Y + 16, dw, 1, P.deskHi); R(dx, Y + 29, dw, 5, P.deskFr); R(dx, Y + 28, dw, 1, 'rgba(0,0,0,.18)'); R(dx + 1, Y + 34, 2, 3, P.deskFr); R(dx + dw - 3, Y + 34, 2, 3, P.deskFr);
+      c.scr.forEach(s => { R(s.x - 1, s.y - 1, 18, 12, P.bez); R(s.x + 6, s.y + 11, 4, 3, P.bez); R(s.x + 4, s.y + 13, 8, 1, P.bez); });
+      R(x - 7, Y + 21, 14, 3, '#c9cfdc'); R(x - 6, Y + 22, 12, 1, '#8e97ad'); R(x + 10, Y + 21, 2, 3, '#c9cfdc');
+      const d = c.b.seed % 3;
+      if (c.ch) { R(x + 7, Y + 30, 14, 3, '#d9b44a'); R(dx + 3, Y + 18, 6, 5, '#f2efe6'); R(dx + 3, Y + 19, 5, 1, '#9aa3b8'); R(dx + dw - 10, Y + 17, 7, 3, '#3aa35c'); R(dx + dw - 9, Y + 20, 5, 3, '#b0643a'); }
+      else if (d === 0) { R(dx + dw - 7, Y + 18, 5, 4, '#f2efe6'); R(dx + dw - 7, Y + 19, 4, 1, '#9aa3b8'); } else if (d === 1) { R(dx + 2, Y + 18, 4, 3, '#3aa35c'); R(dx + 2, Y + 21, 4, 2, '#b0643a'); } else { R(dx + dw - 6, Y + 18, 3, 4, '#f5a524'); }
+      R(x - 6, Y + 39, 12, 3, P.chairD); R(x - 10, Y + 3, 20, 14, P.lamp);
+    });
+  }
+  function scrn(s, a, t, seed, i) {
+    const x = s.x, y = s.y;
+    if (a === 'idle') { R(x, y, 16, 10, P.off); if (((t / 900) | 0) % 2) R(x + 14, y + 8, 1, 1, '#3fd07a'); return; }
+    if (a === 'typing') {
+      R(x, y, 16, 10, '#0f1a2e'); const ln = ((t / 700) | 0) % 4;
+      for (let k = 0; k < 4; k++) { let w = 3 + (hash(seed + ':' + k + i) % 10); if (k === ln) w = Math.min(w, 1 + ((t % 700) / 60 | 0)); if (k > ln && ((t / 2800) | 0) % 2 === 0) continue; R(x + 1 + (k % 2) * 2, y + 1 + k * 2, w, 1, ['#7dd3fc', '#c4b5fd', '#86efac', '#fcd34d'][k]); }
+      if (((t / 260) | 0) % 2) R(x + 14, y + 1 + ln * 2, 1, 1, '#fff'); if (hash('f' + ((t / 90) | 0) + seed) % 13 === 0) R(x, y, 16, 10, 'rgba(255,255,255,.12)'); return;
+    }
+    if (a === 'browsing') { R(x, y, 16, 10, '#e8eefc'); R(x, y, 16, 2, '#3e8ef7'); const o = ((t / 110) | 0) % 6; for (let k = -1; k < 4; k++) { const yy = y + 3 + k * 2 + (6 - o) / 3 | 0; if (yy < y + 2 || yy > y + 9) continue; R(x + 1, yy, k % 3 === 0 ? 6 : 12 - (k & 1) * 3, 1, k % 3 === 0 ? '#f5a524' : '#8e97ad'); } return; }
+    if (a === 'reading') { R(x, y, 16, 10, '#f7f4ea'); for (let k = 0; k < 4; k++) R(x + 2, y + 2 + k * 2, k === 3 ? 7 : 12, 1, '#8e97ad'); return; }
+    if (a === 'waiting') { R(x, y, 16, 10, '#16213f'); const f = ((t / 350) | 0) % 4; for (let k = 0; k < 3; k++) R(x + 4 + k * 3, y + 4, 2, 2, k < f ? '#fbbf24' : '#3b4670'); return; }
+    R(x, y, 16, 10, '#1d1838'); const b = ((t / 600) | 0) % 2; R(x + 2, y + 2, 8, 3, b ? '#c4b5fd' : '#7c6bd6'); R(x + 6, y + 6, 8, 3, b ? '#7dd3fc' : '#3e8ef7');
+  }
+  function zz(x, y, c, n) { const w = n ? 4 : 3; R(x - 1, y - 1, w + 2, w + 2, OL); R(x, y, w, 1, c); for (let i = 1; i < w - 1; i++) R(x + w - 1 - i, y + i, 1, 1, c); R(x, y + w - 1, w, 1, c); }
+  function arm(x, y1, y2, c) { R(x - 1, y1, 4, y2 - y1, OL); R(x, y1, 2, y2 - y1, c); }
+  function hand(x, y, c) { R(x - 1, y - 1, 4, 4, OL); R(x, y, 2, 2, c); }
+  function seated(c, t) {
+    const b = c.b, x = c.cx, Y = c.y, a = b.act, hy = Y + 24, sh = b.shirt, sk = b.skin;
+    if (a === 'idle' && b.nap) {
+      R(x - 8, Y + 28, 16, 9, OL); R(x - 7, Y + 29, 14, 8, sh); R(x - 10, Y + 24, 20, 5, OL); R(x - 9, Y + 25, 18, 3, sh); R(x - 5, Y + 19, 10, 8, OL); R(x - 4, Y + 20, 8, 6, b.hair);
+      if (RM) { zz(x + 12, Y + 12, P.z, 1); zz(x + 18, Y + 6, P.z, 0); } else for (let k = 0; k < 2; k++) { const ph = ((t + k * 1100) % 2200) / 2200; zz(x + 10 + Math.round(ph * 6), Y + 16 - Math.round(ph * 14), P.z, k === 0); }
+      return;
+    }
+    if (a === 'typing') { const f = RM ? 0 : ((t / 110) | 0) % 2; arm(x - 8, Y + 25, hy + 9, sh); arm(x + 6, Y + 25, hy + 9, sh); hand(x - 8, Y + 23 - f, sk); hand(x + 6, Y + 22 + f, sk); }
+    else if (a === 'browsing') { const m = RM ? 0 : Math.round(Math.sin(t / 300)); arm(x - 8, Y + 25, hy + 9, sh); hand(x - 8, Y + 23, sk); arm(x + 7, Y + 25, hy + 9, sh); hand(x + 9 + m, Y + 23, sk); }
+    else if (a === 'reading') { const bo = RM ? 0 : ((t / 1200) | 0) % 2; arm(x + 6, Y + 22, hy + 9, sh); R(x + 1, Y + 10 + bo, 10, 13, OL); R(x + 2, Y + 11 + bo, 8, 11, '#f7f4ea'); for (let k = 0; k < 4; k++) R(x + 3, Y + 13 + bo + k * 2, k === 3 ? 4 : 6, 1, '#8e97ad'); hand(x + 2, Y + 20 + bo, sk); }
+    else if (a === 'waiting') { const tp = RM ? 0 : ((t / 260) | 0) % 2; arm(x - 9, Y + 27, hy + 9, sh); hand(x - 9, Y + 25 - tp, sk); const cy = Y - 1 + (RM ? 0 : ((t / 500) | 0) % 2); R(x + 11, cy, 9, 9, OL); R(x + 12, cy + 2, 7, 5, '#fbbf24'); R(x + 13, cy + 1, 5, 7, '#fbbf24'); R(x + 15, cy + 2, 1, 3, OL); R(x + 15, cy + 4, 2, 1, OL); }
+    else if (a === 'idle') { const sip = !RM && (t % 4200) < 1300, my = sip ? Y + 22 : Y + 21, mx = sip ? x + 5 : x + 11; if (sip) arm(x + 6, Y + 25, hy + 9, sh); R(mx - 1, my - 1, 6, 5, OL); R(mx, my, 3, 3, '#efe9dc'); R(mx + 3, my + 1, 1, 1, '#efe9dc'); if (sip) hand(x + 5, Y + 24, sk); if (!sip && !RM && ((t / 400) | 0) % 2) R(mx + 1, my - 3, 1, 2, '#d7dbe6'); }
+    R(x - 8, hy + 6, 16, 9, OL); R(x - 7, hy + 7, 14, 8, sh); R(x - 7, hy + 7, 14, 1, 'rgba(255,255,255,.2)'); R(x - 5, hy - 1, 10, 9, OL); R(x - 4, hy, 8, 7, b.hair); R(x - 3, hy + 1, 3, 1, 'rgba(255,255,255,.22)'); R(x - 5, hy + 3, 1, 2, sk); R(x + 4, hy + 3, 1, 2, sk);
+  }
+  function stand(fx, fy, b, t, mv, up) {
+    const x = Math.round(fx) - 4, top = Math.round(fy) - 18, st = mv && !RM ? ((t / 140) | 0) % 2 : 0;
+    R(x - 1, top + 18, 10, 1, P.sh); R(x, top + 13, 8, 5, OL); R(x + 1, top + 13, 2, st ? 3 : 4, b.pants); R(x + 5, top + 13, 2, st ? 4 : 3, b.pants); R(x + 1, top + 16 + (st ? 0 : 1), 2, 1, '#0c0e18'); R(x + 5, top + 17 - (st ? 0 : 1), 2, 1, '#0c0e18');
+    R(x - 3, top + 6, 14, 8, OL); R(x - 1, top + 7, 10, 6, b.shirt); R(x - 2, top + 8 + st, 2, 4, b.shirt); R(x + 8, top + 9 - st, 2, 4, b.shirt); R(x - 2, top + 12 + st, 2, 1, b.skin); R(x + 8, top + 13 - st, 2, 1, b.skin);
+    R(x - 1, top - 1, 10, 9, OL); if (up) { R(x, top, 8, 7, b.hair); } else { R(x, top, 8, 7, b.skin); R(x, top, 8, 3, b.hair); R(x, top + 3, 1, 2, b.hair); R(x + 7, top + 3, 1, 2, b.hair); if (((t / 2600) | 0) % 5 || RM) { R(x + 2, top + 4, 1, 1, OL); R(x + 5, top + 4, 1, 1, OL); } R(x + 3, top + 6, 2, 1, '#c0786a'); }
+  }
+  function env(x, y) { x = Math.round(x); y = Math.round(y); R(x - 4, y - 3, 9, 7, '#7a5c2e'); R(x - 3, y - 2, 7, 5, '#fffaf0'); R(x - 2, y - 1, 1, 1, '#c9a96e'); R(x - 1, y, 1, 1, '#c9a96e'); R(x, y + 1, 1, 1, '#e5484d'); R(x + 1, y, 1, 1, '#c9a96e'); R(x + 2, y - 1, 1, 1, '#c9a96e'); }
+  function loopLen() { return LM.length * SL + 1400; }
+  function msgAt(t) { if (!LM.length) return { i: -1 }; if (RM) return { i: LM.length - 1, l: 0 }; const tt = t % loopLen(), i = Math.floor(tt / SL); if (i >= LM.length) return { i: -1 }; return { i, l: tt - i * SL }; }
+  function draw(t) {
+    if (!ctx) return;
+    g = bx; g.drawImage(bg, 0, 0);
+    cells.forEach(c => {
+      const b = c.b; if (b.act === 'idle') g.globalAlpha = b.revoked ? .38 : .78;
+      c.scr.forEach((s, i) => scrn(s, b.act, t, b.seed, i));
+      if (b.act !== 'coordinating' && !b.vacant) seated(c, t);
+      const x = c.cx, Y = c.y; R(x - 6, Y + 36, 12, 7, OL); R(x - 5, Y + 37, 10, 5, P.chair); R(x - 5, Y + 37, 10, 1, P.chairHi); R(x - 1, Y + 42, 2, 2, P.chairD); R(x - 5, Y + 44, 3, 1, P.chairD); R(x + 2, Y + 44, 3, 1, P.chairD);
+      g.globalAlpha = 1;
+    });
+    cells.forEach(c => { if (c.b.act !== 'coordinating' || c.b.vacant) return; const w = c.route && !RM ? walkAt(c, t) : { x: c.home.x, y: c.home.y }; stand(w.x, w.y, c.b, t, w.mv, w.up); });
+    const m = msgAt(t);
+    if (m.i >= 0 && !RM) {
+      const MM = LM[m.i], A = pos[MM.from], B = pos[MM.to], l = m.l;
+      if (A && B && l >= 300 && l < 300 + FL) {
+        let u = (l - 300) / FL; u = u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+        const ax = A.cx, ay = A.y + 6, bx2 = B.cx, by = B.y + 6, mx = (ax + bx2) / 2, my = Math.min(ay, by) - Math.min(46, Math.hypot(bx2 - ax, by - ay) * .35 + 12);
+        const qq = v => ({ x: (1 - v) * (1 - v) * ax + 2 * (1 - v) * v * mx + v * v * bx2, y: (1 - v) * (1 - v) * ay + 2 * (1 - v) * v * my + v * v * by });
+        for (let k = 3; k > 0; k--) { const p = qq(Math.max(0, u - k * .035)); g.globalAlpha = .25 * (4 - k); R(p.x, p.y, 2, 2, '#fbbf24'); } g.globalAlpha = 1; const e = qq(u); env(e.x, e.y);
+      }
+      if (A && B && l >= 300 + FL && l < 300 + FL + 450) { const k2 = (l - 300 - FL) / 450, d = 2 + Math.round(k2 * 7); g.globalAlpha = 1 - k2; [[d, 0], [-d, 0], [0, d], [0, -d], [d - 2, d - 2], [2 - d, d - 2]].forEach(o => R(B.cx + o[0], B.y + 10 + o[1], 2, 2, '#fbbf24')); g.globalAlpha = 1; }
+    }
+    ctx.imageSmoothingEnabled = false; ctx.clearRect(0, 0, cv.width, cv.height); ctx.drawImage(buf, 0, 0, W * S, H * S);
+    msgUI(m);
+  }
+
+  /* ---------- overlays ---------- */
+  function placeDesks() {
+    const ov = q('#ov');
+    ov.innerHTML = cells.map(c => {
+      const b = c.b; if (b.vacant) return '';
+      const lab = b.name + ', ' + (b.role || 'bot') + '. ' + (b.revoked ? 'Key revoked' : ACTS[b.act] + (b.doing ? ': ' + b.doing : '')) + '. Select to open details.';
+      return '<button type="button" class="desk" data-bot="' + esc(b.id) + '" aria-pressed="' + (SEL === b.id) + '" aria-label="' + esc(lab) + '" style="left:' + c.x * PX + 'px;top:' + c.y * PX + 'px;width:' + c.w * PX + 'px;height:' + c.h * PX + 'px">' +
+        (b.revoked ? '<span class="rvk" aria-hidden="true">Key revoked</span>' : '') +
+        '<span class="plate' + (b.act === 'idle' ? ' idle' : '') + (b.revoked ? ' revoked' : '') + (c.ch ? ' chief' : '') + '" aria-hidden="true">' + (c.ch ? '<span style="display:flex;gap:4px;align-items:center"><span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span></span><small>' + esc(M.chiefLabel) + '</small>' : '<span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span>') + '</span></button>';
+    }).join('');
+    if (!M.bots.length && opts.emptySign && lounge) ov.innerHTML += '<div class="sign" style="left:' + (lounge.x + lounge.w / 2) * PX + 'px;top:' + (lounge.y + 50) * PX + 'px">' + esc(opts.emptySign) + '</div>';
+    if (hov && pos[hov]) showHov(hov); else hideHov();
+    if (opts.onLayout) opts.onLayout();
+  }
+  function placeBub(el, c) {
+    el.hidden = false; el.classList.remove('l'); el.style.maxWidth = '';
+    const sw = W * PX, hw = (c.ch ? 34 : 21) + 4, xr = (c.cx + hw) * PX + 6, xl = (c.cx - hw) * PX - 6, sR = sw - xr - 3, sL = xl - 3; let bw = el.offsetWidth; const left = sR >= bw || (sL < bw && sR >= sL);
+    const sp = left ? sR : sL; if (bw > sp) { el.style.maxWidth = Math.max(140, sp) + 'px'; bw = el.offsetWidth; }
+    const x = left ? Math.min(xr, sw - bw - 2) : Math.max(2, xl - bw); if (!left) el.classList.add('l');
+    const bh = el.offsetHeight, y = Math.max(bh / 2 + 2, c.y * PX + bh / 2 + 2, (c.y + 11) * PX); el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.setProperty('--tail', Math.max(10, Math.min(bh - 10, (c.y + 11) * PX - y + bh / 2)) + 'px');
+  }
+  function showHov(id) {
+    const c = pos[id], el = q('#hbub'); if (!c) return; hov = id; const b = c.b;
+    el.innerHTML = '<b>' + esc(b.emoji + ' ' + b.name) + '</b><span class="act">● ' + (b.revoked ? 'Key revoked' : ACTS[b.act]) + '</span><br>' + esc(b.revoked ? 'Can\'t report until the owner rotates its key' : (b.doing || b.role || 'No details')); placeBub(el, c);
+    if (curMsg >= 0 && LM[curMsg] && LM[curMsg].from === id) q('#mbub').hidden = true;
+  }
+  function hideHov() { hov = null; q('#hbub').hidden = true; curMsg = -2; }
+  function msgUI(m) {
+    let i = m.i; const show = i >= 0 && (RM || m.l < 3300); if (!show) i = -1; if (i === curMsg) return; curMsg = i; const el = q('#mbub');
+    const key = i >= 0 ? LM[i].key : null, L = q('#log');
+    L.querySelectorAll('li[data-k]').forEach(li => {
+      const on = li.getAttribute('data-k') === key; li.classList.toggle('now', on);
+      if (on && L.clientHeight) { const o = li.offsetTop - L.offsetTop; if (o < L.scrollTop || o + li.offsetHeight > L.scrollTop + L.clientHeight) L.scrollTop = o - 8; }
+    });
+    if (i < 0 || hov === LM[i].from || !pos[LM[i].from]) { el.hidden = true; return; }
+    const MM = LM[i], f = bot(MM.from), to = bot(MM.to); el.innerHTML = '<b>' + esc(f.emoji + ' ' + f.name) + ' → ' + esc(to.emoji + ' ' + to.name) + '</b>' + esc(trunc(MM.text, 50)); placeBub(el, pos[MM.from]);
+  }
+  const ov = q('#ov');
+  const onClick = e => {
+    const d = e.target.closest('.desk'); if (!d) return; const id = d.getAttribute('data-bot');
+    if (opts.onDesk) opts.onDesk(id); else { SEL = SEL === id ? '' : id; renderTasks(); if (SEL) showHov(id); else hideHov(); }
+  };
+  ov.addEventListener('click', onClick);
+  ov.addEventListener('mouseover', e => { const d = e.target.closest('.desk'); if (d) showHov(d.getAttribute('data-bot')); });
+  ov.addEventListener('mouseleave', () => { if (!ov.contains(document.activeElement)) hideHov(); });
+  ov.addEventListener('focusin', e => { const d = e.target.closest('.desk'); if (d) showHov(d.getAttribute('data-bot')); });
+  ov.addEventListener('focusout', e => { if (!ov.contains(e.relatedTarget)) hideHov(); });
+  const resetBtn = q('#reset'); const onReset = () => { select(''); if (opts.onReset) opts.onReset(); };
+  resetBtn.addEventListener('click', onReset);
+
+  /* ---------- loop ---------- */
+  let T = 0, run = false, prev = 0, last = 0, raf = 0;
+  if (LM.length) T = Math.max(0, LM.length - 1) * SL + 300 + FL * .5; // start mid-flight on the latest message
+  function frame(now) { if (!run || dead) return; raf = requestAnimationFrame(frame); if (now - last < 38) return; const dt = prev ? Math.min(now - prev, 120) : 0; prev = last = now; T += dt; draw(T); }
+  function start() { if (dead) return; if (RM || run || document.hidden) { draw(T); return; } run = true; prev = 0; raf = requestAnimationFrame(frame); }
+  function stop() { run = false; cancelAnimationFrame(raf); }
+  const onVis = () => { document.hidden ? stop() : start(); };
+  document.addEventListener('visibilitychange', onVis);
+  let lw = -1; const stageP = q('#stage').parentNode;
+  function relayout(force) { const w = stageP ? stageP.clientWidth : 0; if (w === lw && !force) return; lw = w; layout(); draw(T); }
+  let ro = null; if (window.ResizeObserver && stageP) { ro = new ResizeObserver(() => relayout()); ro.observe(stageP); } else addEventListener('resize', () => relayout());
+
+  function select(id) { SEL = id && M.BY[id] ? id : ''; renderTasks(); if (SEL) showHov(SEL); else hideHov(); }
+  function setData(D) {
+    const prevKeys = new Set(M.msgs.map(m => m.key)), prevLayout = M.bots.map(b => b.id + ':' + b.act + (b.revoked ? 'R' : '')).join(',') + '|' + (M.chief && M.chief.id);
+    M = model(D); M.bots.forEach(dress); LM = loopMsgs();
+    if (SEL && !M.BY[SEL]) SEL = '';
+    renderHud(); renderTasks(); renderLog();
+    const nowLayout = M.bots.map(b => b.id + ':' + b.act + (b.revoked ? 'R' : '')).join(',') + '|' + (M.chief && M.chief.id);
+    if (nowLayout !== prevLayout) relayout(true); else placeDesks();
+    const fresh = LM.findIndex(m => !prevKeys.has(m.key));
+    if (fresh >= 0 && !RM) { const i = LM.length - 1; T = Math.floor(T / loopLen()) * loopLen() + i * SL; } // fly the newest message now
+    draw(T);
+  }
+  renderHud(); renderTasks(); renderLog(); relayout(true); start();
+
+  return {
+    setData, setConn, select, get selected() { return SEL; }, get model() { return M; }, bot,
+    deskEl: id => root.querySelector('.desk[data-bot="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]'),
+    taskLi, relayout: () => relayout(true),
+    destroy() { dead = true; stop(); document.removeEventListener('visibilitychange', onVis); if (ro) ro.disconnect(); },
+  };
+}

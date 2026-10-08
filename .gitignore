@@ -1,0 +1,4 @@
+node_modules/
+.DS_Store
+status.json
+*.local.js
