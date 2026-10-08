@@ -41,6 +41,12 @@ export function ago(ts, now = Date.now()) {
 /** A bot counts as "fresh" if it reported in the last 5 minutes. */
 export function isFresh(ts, now = Date.now()) { const t = Date.parse(ts); return !isNaN(t) && now - t < 5 * 60 * 1000; }
 
+/** Workspace slug with a random 4-char suffix, e.g. my-office-x7k2 (fits the backend's ^[a-z0-9][a-z0-9-]{1,47}$). */
+export function slugWithSuffix(base) {
+  const A = 'abcdefghijklmnopqrstuvwxyz0123456789', b = new Uint8Array(4); crypto.getRandomValues(b);
+  const head = (slugify(base) || 'office').slice(0, 40).replace(/-+$/, '') || 'office';
+  return head + '-' + Array.from(b, x => A[x % 36]).join('');
+}
 export function slugify(s) {
   return str(s).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
 }

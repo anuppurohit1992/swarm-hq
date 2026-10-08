@@ -1,7 +1,7 @@
 /* SUPABASE backend. Uses the vendored, pinned supabase-js UMD build (vendor/supabase-js-2.117.3).
    Server-side contract (tables, RLS, RPCs) is documented in BACKEND.md. Only the public anon key is used here. */
 import { authRedirectUrl } from './index.js';
-import { slugify } from '../util.js';
+import { slugify, slugWithSuffix } from '../util.js';
 
 const SB_SRC = new URL('../../vendor/supabase-js-2.117.3/supabase.js', import.meta.url).href;
 const BOT_COLS = 'id,workspace_id,slug,name,role,emoji,activity,doing,last_heartbeat,key_prefix,revoked_at,created_at'; // key hashes live in bot_keys (no client access)
@@ -56,13 +56,10 @@ export async function create(cfg) {
     },
     /** Must run after every sign-in / app load: links pending invites for this email. */
     async acceptInvites() { try { return chk(await sb.rpc('accept_pending_invites')); } catch (e) { console.warn('accept_pending_invites failed:', e.message); return 0; } },
-    async ensureWorkspace() {
-      const l = await this.listWorkspaces(); return l[0] || this.createWorkspace('My office');
-    },
     async createWorkspace(name) {
       const base = slugify(name) || 'office'; let lastErr = null;
       for (let i = 0; i < 4; i++) {
-        const slug = i ? (base.slice(0, 40) + '-' + Math.random().toString(36).slice(2, 6)) : (base.length < 2 ? base + '-hq' : base);
+        const slug = slugWithSuffix(base); // random suffix up front, so create_workspace doesn't hit slug_taken (retry only on a rare clash)
         try {
           const id = chk(await sb.rpc('create_workspace', { p_name: name, p_slug: slug }));
           const w = one(chk(await sb.from('workspaces').select(WS_COLS).eq('id', id)));

@@ -13,6 +13,7 @@ Backend: Supabase (Postgres + Auth + Realtime + the `report` edge function).
 |---|---|
 | `#/` | Landing + sign-in (email magic link first; Google/GitHub only when enabled in `config.js`) with a demo office preview |
 | `#/demo` | Full demo office, fictional data, simulated updates, no sign-in |
+| `#/start` | No-workspaces / create-workspace screen (first sign-in, after deleting your last workspace, or “+ New workspace”). A workspace is created only when you submit it; its slug gets a random suffix, e.g. `my-office-x7k2` |
 | `#/w/<slug>` | Live office: HUD with LIVE / connection state, pixel office, comms log, missions. Tap a desk to open the bot drawer **and** filter missions to that bot |
 | `#/w/<slug>` (no bots) | Empty-office onboarding: "Add your first bot" opens the create dialog, which shows the key once |
 | `#/w/<slug>/settings` | Owner only: workspace name, members & invites, read-only link (off by default), bots & keys (prefix, Rotate, Revoke, Remove), report snippet, delete workspace |

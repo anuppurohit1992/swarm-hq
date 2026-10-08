@@ -124,3 +124,10 @@ tr.rvkrow td{background:color-mix(in srgb,var(--bad) 5%,transparent)}
 tr.rvkrow .kpre{opacity:.6;text-decoration:line-through}
 @media (max-width:760px){.rvk{font-size:9px;padding:0 4px}.frow{grid-template-columns:1fr}.dlgf{flex-wrap:wrap}}
 .invnote{flex-wrap:wrap}.invnote p{flex:1;min-width:220px}
+/* zero bots + tasks: onboarding and Missions stacked in the side column */
+.sidecol{display:flex;flex-direction:column;gap:14px;min-width:0}
+/* no-workspaces / create workspace screen */
+.startbox{max-width:620px;margin:28px auto;padding:22px 24px}
+.startbox .pt{margin:0 0 6px}
+.newws{display:flex;gap:10px;align-items:flex-end;margin:16px 0 8px;flex-wrap:wrap}
+.newws .fld{flex:1;min-width:200px}

@@ -1,7 +1,7 @@
 /* MOCK backend: same interface as supabase.js, in memory, with simulated realtime updates.
    Nothing leaves the browser. Uses only the fictional demo dataset. */
 import { demoRows, SIM_LINES, SIM_DOING } from './demo-data.js';
-import { randHex, slugify } from '../util.js';
+import { randHex, slugify, slugWithSuffix } from '../util.js';
 
 const B62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 function b62(n) { const a = new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a, x => B62[x % 62]).join(''); }
@@ -75,9 +75,8 @@ export function create() {
         .map(w => ({ ...w, role: w.owner_id === user.id ? 'owner' : 'viewer' }));
     },
     async acceptInvites() { return 0; },
-    async ensureWorkspace() { const l = await this.listWorkspaces(); return l[0] || this.createWorkspace('My office'); },
     async createWorkspace(name) {
-      const id = 'ws-' + randHex(4), base = slugify(name) || 'office'; let slug = base, n = 2; while (db.workspaces.some(w => w.slug === slug)) slug = base + '-' + n++;
+      const id = 'ws-' + randHex(4), base = slugify(name) || 'office'; let slug = slugWithSuffix(base); while (db.workspaces.some(w => w.slug === slug)) slug = slugWithSuffix(base);
       const w = { id, slug, name, owner_id: user.id, share_enabled: false, share_token: null, created_at: new Date().toISOString() };
       db.workspaces.push(w); db.members.push({ workspace_id: id, user_id: user.id, email: user.email, role: 'owner', invited_at: null, accepted_at: w.created_at });
       db.rows[id] = { bots: [], missions: [], tasks: [], messages: [] }; return { ...w, role: 'owner' };
@@ -105,7 +104,7 @@ export function create() {
     // Mirrors set_share_link(p_workspace_id, p_enabled, p_regenerate): disabling clears the token.
     async setShareLink(wsId, enabled, regenerate = false) { requireOwner(wsId); const w = ws(wsId); w.share_enabled = !!enabled; w.share_token = enabled ? ((!w.share_token || regenerate) ? b62(32) : w.share_token) : null; const r = { enabled: w.share_enabled, token: w.share_token }; return { share_enabled: !!r.enabled, share_token: r.token || null }; },
     async loadShared(slug, token) {
-      await sleep(120); const w = db.workspaces.find(x => x.slug === slug);
+      await sleep(120); const w = token ? db.workspaces.find(x => x.share_enabled && x.share_token === token) : null; // like get_shared_workspace(p_token): the token alone identifies the workspace
       if (!w || !w.share_enabled || !token || token !== w.share_token) throw new Error('This read-only link is off or no longer valid.');
       return { workspace: { name: w.name, slug: w.slug }, rows: JSON.parse(JSON.stringify(db.rows[w.id])) };
     },

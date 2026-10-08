@@ -25,15 +25,18 @@ function bodyMarkup(empty, o) {
       '<li class="cur"><span class="n mono">2</span><div><b>Add your first bot</b><p>Pick a name, role and emoji. The bot gets its own API key, shown once with a Copy button.</p><button class="btn pri big" type="button" id="addfirst">+ Add your first bot</button></div></li>' +
       '<li><span class="n mono">3</span><div><b>Send its first report</b><p>One HTTPS call reports activity, tasks and messages. The desk lights up within seconds.</p><pre class="code mini"><code><span class="c-cmd">POST</span> <span class="c-url">' + esc(reportUrl().replace(/^https:\/\/[^/]+/, '')) + '</span>\n<span class="c-key">x-api-key</span>: $BOT_KEY\n<span class="c-key">Content-Type</span>: application/json</code></pre><p class="hint">Use that bot\'s own key. Full curl, Python and JS snippets are in <a href="#/w/' + encodeURIComponent(ws.slug) + '/settings">Settings → Report snippet</a>.</p></div></li></ol></aside>'
     : '<aside class="panel side onb" aria-labelledby="h-gs"><div class="ph"><h2 id="h-gs">Nothing here yet</h2></div><p class="empty">The owner hasn\'t connected any bots yet. Desks appear here as soon as one reports in.</p></aside>';
+  // No bots but tasks exist (e.g. every bot removed → Unassigned tasks): keep the onboarding AND show the Missions panel.
+  const missions = o.hasTasks ? '<aside class="panel side" aria-labelledby="h-q"><div class="ph"><h2 id="h-q">Missions</h2><button class="btn" id="reset" type="button">Show all</button></div><p class="sel" id="sel" aria-live="polite"></p><div id="quests"></div></aside>' : '';
+  const side = missions ? '<div class="sidecol">' + aside + missions + '</div>' : aside;
   return '<section class="panel hud" id="hud" aria-label="Summary"></section><div class="welcome"><h2 class="pt">' + (o.isOwner ? 'Your office is ready <span aria-hidden="true">👋</span>' : esc(ws.name) + ' is empty') + '</h2><p class="sub">Eight empty desks and a coffee machine. Connect a bot and it takes a desk here.</p></div>' +
-    '<div class="grid"><div class="main">' + office + '</div>' + aside + '</div><footer>Times in ' + esc(TZ_LABEL) + '. Desks appear as bots connect; the office grows to fit any number of bots.</footer>';
+    '<div class="grid"><div class="main">' + office + '</div>' + side + '</div><footer>Times in ' + esc(TZ_LABEL) + '. Desks appear as bots connect; the office grows to fit any number of bots.</footer>';
 }
 
 /**
  * el: container. opts: { headerHtml(conn), wire(el)->cleanup, source:{loadRows, subscribe}, connKind: 'live'|'mock'|'demo'|'shared', workspace, isOwner }
  */
 export async function renderOfficeView(el, opts) {
-  let conn = CONN.connecting, state = 'connecting', office = null, drawer = null, empty = null, unsub = null, unwire = null, dead = false, pollT = 0;
+  let conn = CONN.connecting, state = 'connecting', office = null, drawer = null, empty = null, hasTasks = false, unsub = null, unwire = null, dead = false, pollT = 0;
   el.innerHTML = '<div class="wrap">' + opts.headerHtml(conn) + '<div id="obody"><p class="empty loading">Loading office…</p></div></div>';
   unwire = opts.wire ? opts.wire(el) : null;
   const body = el.querySelector('#obody');
@@ -51,9 +54,9 @@ export async function renderOfficeView(el, opts) {
     return base;
   }
   function build() {
-    const st = rows.status(); empty = st.bots.length === 0;
+    const st = rows.status(); empty = st.bots.length === 0; hasTasks = st.tasks.length > 0;
     if (office) office.destroy(); if (drawer) drawer.destroy();
-    body.innerHTML = bodyMarkup(empty, opts) + (empty ? '' : drawerMarkup());
+    body.innerHTML = bodyMarkup(empty, { ...opts, hasTasks }) + (empty ? '' : drawerMarkup());
     office = createOffice(body, {
       data: st, live: connObj(), vacant: 8, emptyLegend: 'No bots yet · 8 open desks', emptySign: empty ? 'No bots yet · desks are ready' : '',
       onDesk: id => { office.select(id); drawer.open(id, office.deskEl(id)); },
@@ -66,7 +69,7 @@ export async function renderOfficeView(el, opts) {
   }
   function refresh() {
     if (dead) return; const st = rows.status();
-    if ((st.bots.length === 0) !== empty) { build(); return; }
+    if ((st.bots.length === 0) !== empty || (empty && (st.tasks.length > 0) !== hasTasks)) { build(); return; }
     office.setData(st); office.setConn(connObj()); if (drawer && drawer.id) drawer.render();
   }
   build(); setPills(el, conn);
