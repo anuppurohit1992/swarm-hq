@@ -334,7 +334,7 @@ export function createOffice(root, opts = {}) {
       return '<button type="button" class="desk" data-bot="' + esc(b.id) + '" aria-pressed="' + (SEL === b.id) + '" aria-label="' + esc(lab) + '" style="left:' + c.x * PX + 'px;top:' + c.y * PX + 'px;width:' + c.w * PX + 'px;height:' + c.h * PX + 'px">' +
         (b.revoked ? '<span class="rvk" aria-hidden="true">Key revoked</span>' : '') +
         '<span class="plate' + (b.act === 'idle' ? ' idle' : '') + (b.revoked ? ' revoked' : '') + (c.ch ? ' chief' : '') + '" aria-hidden="true">' + (c.ch ? '<span style="display:flex;gap:4px;align-items:center"><span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span></span><small>' + esc(M.chiefLabel) + '</small>' : '<span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span>') + '</span>' +
-        (b.act === 'idle' && !b.revoked ? '<span class="zzz" aria-hidden="true"><i>z</i><i>z</i><i>z</i></span>' : '') + '</button>';
+        (b.act === 'idle' && !b.revoked ? '<span class="zzz" aria-hidden="true"><b>Z</b><b>Z</b><b>Z</b></span>' : '') + '</button>';
     }).join('');
     if (!M.bots.length && opts.emptySign && lounge) ov.innerHTML += '<div class="sign" style="left:' + (lounge.x + lounge.w / 2) * PX + 'px;top:' + (lounge.y + 50) * PX + 'px">' + esc(opts.emptySign) + '</div>';
     if (hov && pos[hov]) showHov(hov); else hideHov();
