@@ -132,17 +132,35 @@ tr.rvkrow .kpre{opacity:.6;text-decoration:line-through}
 .newws{display:flex;gap:10px;align-items:flex-end;margin:16px 0 8px;flex-wrap:wrap}
 .newws .fld{flex:1;min-width:200px}
 
-/* Idle snooze: big, animated, readable on 390px mobile as well as desktop */
-.desk .zzz{position:absolute;top:2px;right:2px;display:flex;gap:1px;align-items:flex-end;pointer-events:none;z-index:2;line-height:1;filter:drop-shadow(0 1px 0 #0b0e14) drop-shadow(0 0 4px rgba(180,200,255,.45))}
-.desk .zzz i{font-style:normal;font-weight:900;color:#d7e0f7;font-size:11px;letter-spacing:-.02em;animation:zzzup 2s ease-in-out infinite;opacity:.95}
-.desk .zzz i:nth-child(2){font-size:13px;animation-delay:.25s}
-.desk .zzz i:nth-child(3){font-size:16px;animation-delay:.5s}
-.desk.chief .zzz,.desk .plate.chief ~ .zzz{top:4px;right:6px}
-@keyframes zzzup{0%,100%{transform:translateY(2px);opacity:.55}40%{transform:translateY(-6px);opacity:1}70%{transform:translateY(-3px);opacity:.85}}
+/* Idle snooze: floats ABOVE the bot sprite, unmistakable on a 390px phone. */
+.desk .zzz{
+  position:absolute;left:50%;top:0;transform:translate(-35%,-92%);
+  display:flex;gap:0;align-items:flex-end;pointer-events:none;z-index:4;line-height:1;
+}
+.desk .zzz i{
+  font-style:normal;font-weight:900;font-family:system-ui,-apple-system,Segoe UI,sans-serif;
+  color:#eef3ff;letter-spacing:-.06em;
+  /* dark outline so it pops on the night office */
+  -webkit-text-stroke:2px #0b0e14;
+  paint-order:stroke fill;
+  text-shadow:0 0 0 #0b0e14, 0 2px 0 #0b0e14, 0 0 10px rgba(210,225,255,.75), 0 0 2px #0b0e14;
+  animation:zzzup 2s ease-in-out infinite;opacity:.98;
+  font-size:18px;
+}
+.desk .zzz i:nth-child(2){font-size:24px;animation-delay:.22s;margin-left:-2px}
+.desk .zzz i:nth-child(3){font-size:28px;animation-delay:.44s;margin-left:-2px}
+/* chief desk is taller — float a bit higher so it clears the plate zone */
+.desk .plate.chief ~ .zzz,.desk:has(.plate.chief) .zzz{transform:translate(-30%,-105%)}
+@keyframes zzzup{
+  0%,100%{transform:translateY(4px) rotate(-4deg);opacity:.7}
+  35%{transform:translateY(-10px) rotate(2deg);opacity:1}
+  70%{transform:translateY(-4px) rotate(-1deg);opacity:.92}
+}
 @media (max-width:760px){
-  .desk .zzz{top:0;right:0}
-  .desk .zzz i{font-size:13px}
-  .desk .zzz i:nth-child(2){font-size:16px}
-  .desk .zzz i:nth-child(3){font-size:19px}
+  .desk .zzz{transform:translate(-30%,-100%)}
+  .desk .zzz i{font-size:20px;-webkit-text-stroke:2.5px #0b0e14}
+  .desk .zzz i:nth-child(2){font-size:26px}
+  .desk .zzz i:nth-child(3){font-size:34px} /* ≥32px — readable at a glance on 390px */
+  .desk:has(.plate.chief) .zzz{transform:translate(-28%,-110%)}
 }
 @media (prefers-reduced-motion:reduce){.desk .zzz i{animation:none}}

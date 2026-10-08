@@ -252,13 +252,14 @@ export function createOffice(root, opts = {}) {
   function zz(x, y, c, n) { const w = n === 2 ? 7 : n ? 6 : 5; R(x - 1, y - 1, w + 2, w + 2, OL); R(x, y, w, 2, c); for (let i = 2; i < w - 1; i++) R(x + w - 1 - i, y + i, 2, 1, c); R(x, y + w - 1, w, 2, c); }
   /** Floating zzz cluster above an idle desk (canvas). */
   function drawZzz(x, y, t) {
-    if (RM) { zz(x + 10, y - 2, P.z, 1); zz(x + 18, y - 10, P.z, 0); zz(x + 24, y - 18, P.z, 2); return; }
+    // Float well above the sprite head (DOM overlay is the primary readable mark; canvas backs it up).
+    if (RM) { zz(x + 6, y - 14, P.z, 1); zz(x + 14, y - 24, P.z, 2); zz(x + 24, y - 34, P.z, 2); return; }
     for (let k = 0; k < 3; k++) {
       const ph = ((t + k * 750) % 2400) / 2400;
-      const ox = x + 8 + Math.round(ph * 10) + k * 2;
-      const oy = y + 4 - Math.round(ph * 22) - k * 2;
-      g.globalAlpha = .55 + .45 * (1 - ph);
-      zz(ox, oy, P.z, k === 0 ? 0 : k === 1 ? 1 : 2);
+      const ox = x + 4 + Math.round(ph * 12) + k * 3;
+      const oy = y - 6 - Math.round(ph * 28) - k * 4;
+      g.globalAlpha = .6 + .4 * (1 - ph);
+      zz(ox, oy, P.z, k === 0 ? 1 : 2);
     }
     g.globalAlpha = 1;
   }
@@ -332,8 +333,8 @@ export function createOffice(root, opts = {}) {
       const lab = b.name + ', ' + (b.role || 'bot') + '. ' + (b.revoked ? 'Key revoked' : ACTS[b.act] + (b.doing ? ': ' + b.doing : '')) + '. Select to open details.';
       return '<button type="button" class="desk" data-bot="' + esc(b.id) + '" aria-pressed="' + (SEL === b.id) + '" aria-label="' + esc(lab) + '" style="left:' + c.x * PX + 'px;top:' + c.y * PX + 'px;width:' + c.w * PX + 'px;height:' + c.h * PX + 'px">' +
         (b.revoked ? '<span class="rvk" aria-hidden="true">Key revoked</span>' : '') +
-        (b.act === 'idle' && !b.revoked ? '<span class="zzz" aria-hidden="true"><i>z</i><i>z</i><i>z</i></span>' : '') +
-        '<span class="plate' + (b.act === 'idle' ? ' idle' : '') + (b.revoked ? ' revoked' : '') + (c.ch ? ' chief' : '') + '" aria-hidden="true">' + (c.ch ? '<span style="display:flex;gap:4px;align-items:center"><span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span></span><small>' + esc(M.chiefLabel) + '</small>' : '<span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span>') + '</span></button>';
+        '<span class="plate' + (b.act === 'idle' ? ' idle' : '') + (b.revoked ? ' revoked' : '') + (c.ch ? ' chief' : '') + '" aria-hidden="true">' + (c.ch ? '<span style="display:flex;gap:4px;align-items:center"><span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span></span><small>' + esc(M.chiefLabel) + '</small>' : '<span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span>') + '</span>' +
+        (b.act === 'idle' && !b.revoked ? '<span class="zzz" aria-hidden="true"><i>z</i><i>z</i><i>z</i></span>' : '') + '</button>';
     }).join('');
     if (!M.bots.length && opts.emptySign && lounge) ov.innerHTML += '<div class="sign" style="left:' + (lounge.x + lounge.w / 2) * PX + 'px;top:' + (lounge.y + 50) * PX + 'px">' + esc(opts.emptySign) + '</div>';
     if (hov && pos[hov]) showHov(hov); else hideHov();
