@@ -8,6 +8,7 @@ import { str, esc, hash, ACTS, TZ_LABEL, hhmm as hhmmTs, fmt, todayLocal, dateTi
 
 function arr(x) { return Array.isArray(x) ? x.filter(v => v && typeof v === 'object') : []; }
 function human(s) { s = str(s).replace(/[_-]+/g, ' ').trim(); return s ? s[0].toUpperCase() + s.slice(1) : ''; }
+function cmpId(a, b) { const x = a.uuid || a.id, y = b.uuid || b.id; return x < y ? -1 : x > y ? 1 : 0; }
 function trunc(s, n) { return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; }
 const TS = { done: ['Done', 'ok'], in_progress: ['In progress', 'run'], waiting: ['Waiting', 'wait'], blocked: ['Blocked', 'bad'], idle: ['Idle', 'mute'], unknown: ['No status', 'mute'] };
 export function tst(s) { return TS[s] || [human(s) || 'Unknown', 'mute']; }
@@ -35,8 +36,12 @@ export function model(D) {
     const a = str(b.activity).trim().toLowerCase();
     const revoked = !!b.revoked; // revoked key: desk dimmed, idle sprite, "Key revoked" badge
     return { id: str(b.id) || 'bot-' + i, name: str(b.name) || str(b.id) || 'Unnamed bot', role: str(b.role), emoji: str(b.emoji) || '🤖',
-      act: revoked ? 'idle' : (ACTS[a] ? a : 'idle'), reported: ACTS[a] ? a : 'idle', revoked, doing: revoked ? '' : str(b.doing).trim(), hb: str(b.last_heartbeat), keyPrefix: str(b.key_prefix), uuid: str(b.uuid) };
+      act: revoked ? 'idle' : (ACTS[a] ? a : 'idle'), reported: ACTS[a] ? a : 'idle', revoked, doing: revoked ? '' : str(b.doing).trim(), hb: str(b.last_heartbeat), keyPrefix: str(b.key_prefix), uuid: str(b.uuid),
+      team: str(b.team).trim().replace(/\s+/g, ' ').slice(0, 40), cts: Date.parse(str(b.created_at)), i };
   });
+  // Stable desk order: created_at, then id (rows without created_at, e.g. the share snapshot, keep the server's created_at order).
+  bots.sort((a, b) => (isFinite(a.cts) && isFinite(b.cts) ? (a.cts - b.cts) || cmpId(a, b) : a.i - b.i));
+  bots.forEach((b, k) => { b.ord = k; });
   const BY = {}; bots.forEach(b => { BY[b.id] = b; });
   const chief = bots.find(b => !b.revoked && /chief of staff|coordinator/i.test(b.role)) || null;
   const chiefLabel = chief && /chief of staff/i.test(chief.role) ? 'Chief of Staff' : 'Coordinator';
@@ -65,7 +70,8 @@ export function model(D) {
 
 const P = { fl: ['#262b42', '#2a304a'], wall: '#343a5c', trim: '#222640', base: '#1a1d30', win: '#141e45', winHi: '#1c2c66', star: '#dfe6ff', frame: '#596089', desk: '#8b5e3c', deskHi: '#a8744b', deskFr: '#5c3b22', bez: '#14161f', off: '#0a0c15', chair: '#47508a', chairHi: '#5a64a3', chairD: '#2a3054', rug: '#3a2f62', rugB: '#5d4c96', sh: 'rgba(0,0,0,.3)', z: '#dfe6ff', lamp: 'rgba(255,214,140,.07)' };
 const HAIR = ['#2b1d14', '#5a3825', '#d8a65e', '#141414', '#8b4a2b', '#b9bccb', '#6b2f5f'], SKIN = ['#f2c9a5', '#dba77d', '#ab7349', '#7b4b2c'], SHIRT = ['#e5484d', '#3e8ef7', '#30a46c', '#f5a524', '#8e4ec6', '#12a594', '#e5689f', '#ef7a38'], PANTS = ['#2b3150', '#3b2f2a', '#203a4a', '#3a3a44'];
-const WALL = 34, CH = 62, CCH = 68, OL = '#151827', SL = 3600, FL = 1800;
+const WALL = 34, CH = 62, CCH = 68, OPEN_DESKS = 10, OL = '#151827', SL = 3600, FL = 1800;
+const ZT = ['rgba(124,108,214,.13)', 'rgba(62,142,247,.12)', 'rgba(48,164,108,.12)', 'rgba(245,165,36,.11)', 'rgba(229,104,159,.12)', 'rgba(18,165,148,.12)', 'rgba(239,122,56,.11)'];
 const RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 function dress(b) { const h = hash(b.id); b.hair = HAIR[h % 7]; b.skin = SKIN[(h >>> 3) % 4]; b.shirt = SHIRT[(h >>> 5) % 8]; b.pants = PANTS[(h >>> 8) % 4]; b.seed = h; b.nap = (h >>> 11) % 2; return b; }
 
@@ -81,7 +87,7 @@ export function drawSprite(canvas, b) {
 
 /**
  * Mount an office into `root`.
- * opts: { data, live:{state,label,text,sub}|null, vacant:n, emptyLegend, emptySign, onDesk(id), selectable:true, interactiveTasks:true }
+ * opts: { data, live:{state,label,text,sub}|null, openDesks:n (default 10), emptyLegend, emptySign, onDesk(id), selectable:true, interactiveTasks:true }
  */
 export function createOffice(root, opts = {}) {
   const DUM = document.createElement('div');
@@ -89,7 +95,9 @@ export function createOffice(root, opts = {}) {
   let M = model(opts.data), SEL = '', hov = null, curMsg = -2, conn = opts.live || null;
   M.bots.forEach(dress);
   const cv = q('#cv'), ctx = cv.getContext ? cv.getContext('2d') : null, buf = document.createElement('canvas'), bx = buf.getContext('2d'), bg = document.createElement('canvas');
-  let g, W = 300, H = 200, S = 2, PX = 1, cells = [], pos = {}, lounge = null, dead = false;
+  let g, W = 300, H = 200, S = 2, PX = 1, cells = [], pos = {}, lounge = null, zonesL = [], dead = false;
+  const OPEN = opts.openDesks == null ? OPEN_DESKS : Math.max(0, opts.openDesks | 0);
+  const ARR = {}; // bot id -> T when it arrived live (short fade/drop-in)
   function R(x, y, w, h, c) { g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), w, h); }
   function bot(id) { id = str(id); return M.BY[id] || { id, name: id ? id + ' (removed)' : 'Unassigned', emoji: '❔', role: '' }; }
   // Live flight queue: empty on load. History stays in the comms log only.
@@ -110,7 +118,7 @@ export function createOffice(root, opts = {}) {
       '<div class="st"><span class="k">In progress</span><span class="v c-run">' + cnt.in_progress + '</span></div>' +
       '<div class="st"><span class="k">Waiting</span><span class="v c-wait">' + cnt.waiting + (oth ? '<small> +' + oth + ' other</small>' : '') + '</span></div>' + liveCell();
     const ac = {}; let rv = 0; M.bots.forEach(b => { if (b.revoked) rv++; else ac[b.act] = (ac[b.act] || 0) + 1; });
-    q('#legend').innerHTML = M.bots.length ? Object.keys(ACTS).filter(a => ac[a]).map(a => '<span><i class="a-' + a + '"></i>' + ac[a] + ' ' + ACTS[a].toLowerCase() + '</span>').join('') + (rv ? '<span><i class="rvk-i"></i>' + rv + ' key revoked</span>' : '') + '<span>· Tap a desk to see what a bot is doing</span>' : '<span>' + esc(opts.emptyLegend || 'No bots yet.') + '</span>';
+    q('#legend').innerHTML = M.bots.length ? Object.keys(ACTS).filter(a => ac[a]).map(a => '<span><i class="a-' + a + '"></i>' + ac[a] + ' ' + ACTS[a].toLowerCase() + '</span>').join('') + (rv ? '<span><i class="rvk-i"></i>' + rv + ' key revoked</span>' : '') + (OPEN ? '<span class="lg-open"><i class="open-i"></i>' + OPEN + ' open desk' + (OPEN === 1 ? '' : 's') + '</span>' : '') + '<span>· Tap a desk to see what a bot is doing</span>' : '<span>' + esc(opts.emptyLegend || 'No bots yet.') + '</span>';
   }
   function setConn(c) { conn = c; const el = root.querySelector('#conncell'); if (el) el.outerHTML = liveCell(); else renderHud(); }
 
@@ -160,26 +168,55 @@ export function createOffice(root, opts = {}) {
     M.msgs.forEach(m => { if (m.from === b.id) add(m.to); if (m.to === b.id) add(m.from); });
     return s.slice(0, 4);
   }
-  function vacants() { const V = []; for (let i = 0; i < (M.bots.length ? 0 : (opts.vacant || 0)); i++) V.push({ id: '__v' + i, name: '', role: '', emoji: '', act: 'idle', doing: '', vacant: 1, seed: hash('v' + i) }); return V; }
+  function vacants(n) { const V = []; for (let i = 0; i < n; i++) V.push({ id: '__open' + i, name: '', role: '', emoji: '', act: 'idle', doing: '', vacant: 1, seed: hash('open' + i) }); return V; }
+  /** Team zones, derived only from data: bots.team (blank = General). Zone order = earliest created_at of its bots, then name. */
+  function zoneList() {
+    const Z = new Map();
+    M.bots.forEach(b => {
+      const key = b.team ? 't:' + b.team.toLowerCase() : 'general'; let z = Z.get(key);
+      if (!z) Z.set(key, z = { key, name: b.team || 'General', general: !b.team, bots: [], ts: b.cts, ord: b.ord });
+      z.bots.push(b);
+    });
+    return [...Z.values()].sort((a, b) => (isFinite(a.ts) && isFinite(b.ts) ? a.ts - b.ts : a.ord - b.ord) || a.name.localeCompare(b.name));
+  }
   function layout() {
     const stage = q('#stage'), par = stage.parentNode || DUM;
-    const cssW = (par.clientWidth - parseFloat(getComputedStyle(par).paddingLeft || 0) * 2) || 360, dpr = Math.max(1, window.devicePixelRatio || 1);
-    S = Math.max(1, Math.round(dpr * (cssW < 600 ? 1.5 : 2))); PX = S / dpr; W = Math.max(120, Math.floor(cssW / PX));
-    const cols = Math.max(2, Math.min(Math.floor(cssW / (cssW < 600 ? 118 : 136)), Math.floor((W - 8) / 58))), cw = Math.floor((W - 8) / cols), x0 = Math.floor((W - cols * cw) / 2);
-    let y = WALL + 4; cells = []; pos = {};
+    const cssW = (par.clientWidth - parseFloat(getComputedStyle(par).paddingLeft || 0) * 2) || 360, dpr = Math.max(1, window.devicePixelRatio || 1), mob = cssW < 600;
+    S = Math.max(1, Math.round(dpr * (mob ? 1.5 : 2))); PX = S / dpr; W = Math.max(120, Math.floor(cssW / PX));
+    const cols = Math.max(2, Math.min(Math.floor(cssW / (mob ? 118 : 136)), Math.floor((W - 8) / 58))), cw = Math.floor((W - 8) / cols), x0 = Math.floor((W - cols * cw) / 2);
+    const ZH = mob ? 16 : 13, ZP = 4; let y = WALL + 4, deskNo = 0; cells = []; pos = {}; lounge = null; zonesL = [];
     const chief = M.chief;
-    function add(b, x, yy, w, h, ch) {
-      const cx = x + (w >> 1), c = { b, x, y: yy, w, h, cx, ch, scr: ch ? [{ x: cx - 19, y: yy + 5 }, { x: cx + 3, y: yy + 5 }] : [{ x: cx - 8, y: yy + 5 }] };
+    function add(b, x, yy, w, h, ch, zone) {
+      const cx = x + (w >> 1), c = { b, x, y: yy, w, h, cx, ch, zone, no: ++deskNo, scr: ch ? [{ x: cx - 19, y: yy + 5 }, { x: cx + 3, y: yy + 5 }] : [{ x: cx - 8, y: yy + 5 }] };
       c.home = { x: cx + 14, y: yy + 46, c }; c.visit = { x: cx - 15, y: yy + 46, c }; cells.push(c); pos[b.id] = c;
     }
-    const oth = (M.bots.length ? M.bots : vacants()).filter(b => b !== chief), N = oth.length, RN = Math.ceil(N / cols), sz = []; let k = 0;
-    for (let i = 0; i < RN; i++) sz.push(Math.floor(N / RN) + (i < N % RN ? 1 : 0));
-    function rows(a, z) { for (let i = a; i < z; i++) { const r = oth.slice(k, k += sz[i]), sc = Math.floor((cols - r.length) / 2); r.forEach((b, j) => add(b, x0 + (sc + j) * cw, y, cw, CH, 0)); y += CH; } }
-    const tr = Math.ceil(RN / 2); rows(0, tr);
-    const lw = Math.min(Math.max(112, cw * 2), W - 56), lx = Math.floor((W - lw) / 2); lounge = { x: lx, y, w: lw };
-    if (chief) add(chief, lx, y, lw, CCH, 1); y += CCH;
-    rows(tr, RN); H = y + 6;
-    cells.forEach(c => { c.route = null; if (c.b.act === 'coordinating') { const ps = partners(c.b).map(id => pos[id]).filter(Boolean); if (ps.length) c.route = mkRoute(c, ps); } });
+    // Blocks: one per team zone, then a shared "Open desks" area that always holds OPEN empty desks.
+    const blocks = zoneList().map(z => { const hasChief = z.bots.indexOf(chief) >= 0, mem = z.bots.filter(b => b !== chief); return { z, hasChief, mem }; });
+    if (OPEN) blocks.push({ z: { key: 'open', name: 'Open desks', open: 1 }, hasChief: false, mem: vacants(OPEN) });
+    blocks.forEach(B => {
+      const n = B.mem.length;
+      B.w = mob ? cols : Math.min(cols, Math.max(n, B.hasChief ? 2 : 1));
+      B.rows = Math.ceil(n / B.w); B.h = ZH + (B.hasChief ? CCH : 0) + B.rows * CH + ZP;
+    });
+    // Shelf packing: zones sit side by side when they fit (desktop); on mobile every zone is full width, stacked.
+    let shelf = [], used = 0;
+    const flush = () => {
+      if (!shelf.length) return; const sh = Math.max(...shelf.map(B => B.h)); let col = 0; // left-aligned: a zone joining a shelf never moves the zones already on it
+      shelf.forEach(B => {
+        const zx = x0 + col * cw, zw = B.w * cw, zy = y; col += B.w;
+        const Z = { key: B.z.key, name: B.z.name, open: !!B.z.open, general: !!B.z.general, x: zx, y: zy, w: zw, h: sh, n: B.z.open ? B.mem.length : B.z.bots.length, tint: B.z.open ? '' : ZT[hash(B.z.key) % ZT.length] };
+        zonesL.push(Z); let yy = zy + ZH;
+        if (B.hasChief) { const lw = Math.min(zw - 8, Math.max(112, cw * 2)), lx = zx + Math.floor((zw - lw) / 2); lounge = { x: lx, y: yy, w: lw, zx, zw }; add(chief, lx, yy, lw, CCH, 1, Z); yy += CCH; }
+        for (let r = 0; r < B.rows; r++) {
+          const row = B.mem.slice(r * B.w, (r + 1) * B.w), sc = Math.floor((B.w - row.length) / 2);
+          row.forEach((b, j) => add(b, zx + (sc + j) * cw, yy, cw, CH, 0, Z)); yy += CH;
+        }
+      });
+      y += sh; shelf = []; used = 0;
+    };
+    blocks.forEach(B => { if (used + B.w > cols) flush(); shelf.push(B); used += B.w; });
+    flush(); H = y + 6;
+    cells.forEach(c => { c.route = null; if (c.b.act === 'coordinating' && !c.b.vacant) { const ps = partners(c.b).map(id => pos[id]).filter(Boolean); if (ps.length) c.route = mkRoute(c, ps); } });
     buf.width = bg.width = W; buf.height = bg.height = H; cv.width = W * S; cv.height = H * S;
     stage.style.width = W * PX + 'px'; stage.style.height = H * PX + 'px'; cv.style.width = W * PX + 'px'; cv.style.height = H * PX + 'px';
     drawBg(); placeDesks(); curMsg = -2;
@@ -211,16 +248,21 @@ export function createOffice(root, opts = {}) {
     }
     if (W > 220) { let kx = Math.round(W / nw) - 4; if (nw === 1) kx = W - 30; R(kx, 10, 9, 9, '#2a2d3a'); R(kx + 1, 11, 7, 7, '#f4f1e8'); R(kx + 4, 12, 1, 3, '#2a2d3a'); R(kx + 4, 14, 2, 1, '#2a2d3a'); }
     plant(3, WALL - 12, 1); plant(W - 13, WALL - 12, 1);
+    // Team zones: a tinted floor area with a border; the open-desk area gets a dotted outline only.
+    zonesL.forEach(Z => {
+      const x = Z.x + 2, y = Z.y + 1, w = Z.w - 4, h = Z.h - 3;
+      if (Z.open) { for (let k = x; k < x + w; k += 4) { R(k, y, 2, 1, 'rgba(223,230,255,.16)'); R(k, y + h - 1, 2, 1, 'rgba(223,230,255,.16)'); } for (let k = y; k < y + h; k += 4) { R(x, k, 1, 2, 'rgba(223,230,255,.16)'); R(x + w - 1, k, 1, 2, 'rgba(223,230,255,.16)'); } return; }
+      R(x, y, w, h, Z.tint); R(x, y, w, 1, 'rgba(255,255,255,.1)'); R(x, y + h - 1, w, 1, 'rgba(0,0,0,.25)'); R(x, y, 1, h, 'rgba(255,255,255,.07)'); R(x + w - 1, y, 1, h, 'rgba(0,0,0,.2)');
+    });
     const L = lounge;
     if (L) {
       const ly = L.y;
       if (chief) { R(L.x + 4, ly + 2, L.w - 8, CCH - 8, P.rugB); R(L.x + 6, ly + 4, L.w - 12, CCH - 12, P.rug); for (let rx = L.x + 8; rx < L.x + L.w - 8; rx += 6) R(rx, ly + 4, 2, 1, P.rugB); }
-      else { R(L.x + L.w / 2 - 18, ly + 20, 36, 18, P.deskFr); R(L.x + L.w / 2 - 17, ly + 19, 34, 16, P.desk); }
-      const sp = L.x;
+      const sp = L.x - L.zx;
       if (sp >= 22) {
-        const cx0 = Math.max(4, Math.round(sp / 2) - 7);
+        const cx0 = L.zx + Math.max(4, Math.round(sp / 2) - 7);
         R(cx0, ly + 16, 14, 22, '#3b3f4d'); R(cx0 + 1, ly + 17, 12, 6, '#5b6070'); R(cx0 + 3, ly + 19, 8, 2, '#20232c'); R(cx0 + 10, ly + 18, 2, 2, '#e5484d'); R(cx0 + 4, ly + 26, 6, 7, '#20232c'); R(cx0 + 5, ly + 30, 4, 3, '#f4f0e6'); R(cx0, ly + 38, 14, 2, P.sh);
-        const wx2 = W - Math.round(sp / 2) - 5; R(wx2 + 1, ly + 12, 8, 9, '#8fd3ff'); R(wx2 + 2, ly + 13, 3, 6, '#c9ecff'); R(wx2, ly + 21, 10, 17, '#e9edf3'); R(wx2 + 2, ly + 25, 2, 2, '#3e8ef7'); R(wx2 + 6, ly + 25, 2, 2, '#e5484d'); R(wx2, ly + 38, 10, 2, P.sh);
+        const wx2 = L.zx + L.zw - Math.round(sp / 2) - 5; R(wx2 + 1, ly + 12, 8, 9, '#8fd3ff'); R(wx2 + 2, ly + 13, 3, 6, '#c9ecff'); R(wx2, ly + 21, 10, 17, '#e9edf3'); R(wx2 + 2, ly + 25, 2, 2, '#3e8ef7'); R(wx2 + 6, ly + 25, 2, 2, '#e5484d'); R(wx2, ly + 38, 10, 2, P.sh);
         if (sp >= 40) { plant(cx0 + 2, ly + 44, 0); plant(wx2, ly + 44, 0); }
       }
     }
@@ -283,10 +325,17 @@ export function createOffice(root, opts = {}) {
     if (!ctx) return;
     g = bx; g.drawImage(bg, 0, 0);
     cells.forEach(c => {
-      const b = c.b; if (b.act === 'idle') g.globalAlpha = b.revoked ? .38 : .78;
+      const b = c.b, x = c.cx, Y = c.y;
+      if (b.vacant) { // open desk: furniture only, screen off, no worker
+        g.globalAlpha = .55; c.scr.forEach(s => R(s.x, s.y, 16, 10, P.off));
+        R(x - 6, Y + 36, 12, 7, OL); R(x - 5, Y + 37, 10, 5, P.chair); R(x - 5, Y + 37, 10, 1, P.chairHi); R(x - 1, Y + 42, 2, 2, P.chairD); R(x - 5, Y + 44, 3, 1, P.chairD); R(x + 2, Y + 44, 3, 1, P.chairD);
+        g.globalAlpha = 1; return;
+      }
+      let k = 1; if (ARR[b.id] != null) { k = RM ? 1 : Math.min(1, (t - ARR[b.id]) / 700); if (k >= 1) delete ARR[b.id]; }
+      g.globalAlpha = (b.act === 'idle' ? (b.revoked ? .38 : .78) : 1) * Math.max(.05, k);
       c.scr.forEach((s, i) => scrn(s, b.act, t, b.seed, i));
-      if (b.act !== 'coordinating' && !b.vacant) seated(c, t);
-      const x = c.cx, Y = c.y; R(x - 6, Y + 36, 12, 7, OL); R(x - 5, Y + 37, 10, 5, P.chair); R(x - 5, Y + 37, 10, 1, P.chairHi); R(x - 1, Y + 42, 2, 2, P.chairD); R(x - 5, Y + 44, 3, 1, P.chairD); R(x + 2, Y + 44, 3, 1, P.chairD);
+      if (b.act !== 'coordinating') seated(c, t);
+      R(x - 6, Y + 36, 12, 7, OL); R(x - 5, Y + 37, 10, 5, P.chair); R(x - 5, Y + 37, 10, 1, P.chairHi); R(x - 1, Y + 42, 2, 2, P.chairD); R(x - 5, Y + 44, 3, 1, P.chairD); R(x + 2, Y + 44, 3, 1, P.chairD);
       g.globalAlpha = 1;
     });
     cells.forEach(c => { if (c.b.act !== 'coordinating' || c.b.vacant) return; const w = c.route && !RM ? walkAt(c, t) : { x: c.home.x, y: c.home.y }; stand(w.x, w.y, c.b, t, w.mv, w.up); });
@@ -326,15 +375,19 @@ export function createOffice(root, opts = {}) {
   }
   function placeDesks() {
     const ov = q('#ov');
-    ov.innerHTML = cells.map(c => {
-      const b = c.b; if (b.vacant) return '';
+    const zs = zonesL.map(Z => '<div class="zsign' + (Z.open ? ' open' : '') + (Z.general ? ' general' : '') + '" data-zone="' + (Z.open ? '__open' : esc(Z.name)) + '" data-n="' + Z.n + '" style="left:' + ((Z.x + 4) * PX).toFixed(1) + 'px;top:' + ((Z.y + 2) * PX).toFixed(1) + 'px;max-width:' + ((Z.w - 8) * PX).toFixed(1) + 'px"><span class="zn">' + esc(Z.name) + '</span><small>' + Z.n + '</small></div>').join('');
+    ov.innerHTML = zs + cells.map(c => {
+      const b = c.b, box = 'left:' + c.x * PX + 'px;top:' + c.y * PX + 'px;width:' + c.w * PX + 'px;height:' + c.h * PX + 'px';
+      if (b.vacant) return '<div class="odesk" aria-hidden="true" data-desk="' + c.no + '" data-zone="__open" style="' + box + '"><span class="oplate">Open desk</span></div>';
       const lab = b.name + ', ' + (b.role || 'bot') + '. ' + (b.revoked ? 'Key revoked' : ACTS[b.act] + (b.doing ? ': ' + b.doing : '')) + '. Select to open details.';
-      return '<button type="button" class="desk" data-bot="' + esc(b.id) + '" data-act="' + b.act + (b.revoked ? '" data-revoked="1' : '') + '"' + headAttr(c) + ' aria-pressed="' + (SEL === b.id) + '" aria-label="' + esc(lab) + '" style="left:' + c.x * PX + 'px;top:' + c.y * PX + 'px;width:' + c.w * PX + 'px;height:' + c.h * PX + 'px">' +
+      const arr = ARR[b.id] != null && !RM;
+      return '<button type="button" class="desk' + (arr ? ' arrive' : '') + '" data-bot="' + esc(b.id) + '" data-desk="' + c.no + '" data-zone="' + esc(c.zone.name) + '" data-act="' + b.act + (b.revoked ? '" data-revoked="1' : '') + '"' + headAttr(c) + ' aria-pressed="' + (SEL === b.id) + '" aria-label="' + esc(lab) + '" style="' + box + '">' +
         (b.revoked ? '<span class="rvk" aria-hidden="true">Key revoked</span>' : '') +
         '<span class="plate' + (b.act === 'idle' ? ' idle' : '') + (b.revoked ? ' revoked' : '') + (c.ch ? ' chief' : '') + '" aria-hidden="true">' + (c.ch ? '<span style="display:flex;gap:4px;align-items:center"><span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span></span><small>' + esc(M.chiefLabel) + '</small>' : '<span class="dot a-' + b.act + '"></span>' + esc(b.emoji) + ' <span class="nm">' + esc(b.name) + '</span>') + '</span>' +
         (b.act === 'idle' && !b.revoked ? zzzHtml(c) : '') + '</button>';
     }).join('');
-    if (!M.bots.length && opts.emptySign && lounge) ov.innerHTML += '<div class="sign" style="left:' + (lounge.x + lounge.w / 2) * PX + 'px;top:' + (lounge.y + 50) * PX + 'px">' + esc(opts.emptySign) + '</div>';
+    const oz = zonesL.find(Z => Z.open);
+    if (!M.bots.length && opts.emptySign && oz) ov.innerHTML += '<div class="sign" style="left:' + (oz.x + oz.w / 2) * PX + 'px;top:' + (oz.y + oz.h / 2) * PX + 'px">' + esc(opts.emptySign) + '</div>';
     if (hov && pos[hov]) showHov(hov); else hideHov();
     if (opts.onLayout) opts.onLayout();
   }
@@ -387,12 +440,13 @@ export function createOffice(root, opts = {}) {
 
   function select(id) { SEL = id && M.BY[id] ? id : ''; renderTasks(); if (SEL) showHov(SEL); else hideHov(); }
   function setData(D) {
-    const prevKeys = new Set(M.msgs.map(m => m.key)), prevLayout = M.bots.map(b => b.id + ':' + b.act + (b.revoked ? 'R' : '')).join(',') + '|' + (M.chief && M.chief.id);
+    const lkey = () => M.bots.map(b => b.id + ':' + b.act + (b.revoked ? 'R' : '') + ':' + b.team).join(',') + '|' + (M.chief && M.chief.id);
+    const prevKeys = new Set(M.msgs.map(m => m.key)), prevLayout = lkey(), prevIds = new Set(M.bots.map(b => b.id));
     M = model(D); M.bots.forEach(dress);
+    M.bots.forEach(b => { if (!prevIds.has(b.id) && !RM) ARR[b.id] = T; }); // live arrival (never on first load)
     if (SEL && !M.BY[SEL]) SEL = '';
     renderHud(); renderTasks(); renderLog();
-    const nowLayout = M.bots.map(b => b.id + ':' + b.act + (b.revoked ? 'R' : '')).join(',') + '|' + (M.chief && M.chief.id);
-    if (nowLayout !== prevLayout) relayout(true); else placeDesks();
+    if (lkey() !== prevLayout) relayout(true); else placeDesks();
     // Fly ONLY messages that arrived while this page is open (realtime INSERT / mock sim). Never replay history.
     const fresh = M.msgs.filter(m => !prevKeys.has(m.key));
     if (fresh.length && !RM) { LM = [fresh[fresh.length - 1]]; flightT0 = T; curMsg = -2; }

@@ -38,11 +38,12 @@ export function showKeyDialog({ botName, key, rotated = true }) {
 }
 
 /** Create-bot dialog: name, role, emoji → create_bot → key shown once. */
-export function openCreateBot({ backend, wsId, first = false, onCreated, onClose }) {
+export function openCreateBot({ backend, wsId, first = false, teams = [], onCreated, onClose }) {
   let emoji = EMOJIS[0], done = false;
   const m = modal('<div class="dlgh"><span class="roi" aria-hidden="true">' + ICON.key + '</span><div><h4 id="dlg-t">' + (first ? 'Add your first bot' : 'Add a bot') + '</h4><p class="hint">Give it a name, a role and an emoji. It gets its own API key, shown once.</p></div><button class="icon" type="button" data-close aria-label="Close">' + ICON.close + '</button></div>' +
     '<form id="cbform" novalidate><div class="frow"><label class="fld"><span>Name</span><input name="name" required maxlength="60" placeholder="Research Bot" autocomplete="off"></label><label class="fld"><span>Role</span><input name="role" maxlength="80" placeholder="Web research" autocomplete="off"></label></div>' +
     '<label class="fld"><span>Bot id <span class="hint nocap">used in <code>message.to</code> and task <code>helpers</code></span></span><input name="slug" class="mono" maxlength="32" placeholder="research-bot" autocomplete="off"></label>' +
+    '<label class="fld"><span>Team <span class="hint nocap">optional · bots with the same team share a zone in the office; blank = General</span></span><input name="team" list="cbteams" maxlength="40" placeholder="General" autocomplete="off"><datalist id="cbteams">' + teams.map(t => '<option value="' + esc(t) + '">').join('') + '</datalist></label>' +
     '<div class="fld"><span>Emoji</span><div class="emo" role="radiogroup" aria-label="Emoji">' + EMOJIS.map((e, i) => '<button type="button" role="radio" aria-checked="' + (i === 0) + '"' + (i === 0 ? ' class="on"' : '') + ' data-emo="' + e + '">' + e + '</button>').join('') + '</div></div>' +
     '<p class="formmsg err" id="cberr" role="alert"></p><div class="dlgf"><span class="hint">The key appears once, right after you create the bot.</span><button class="btn pri" type="submit" id="cbgo">Create bot</button></div></form><div id="cbout"></div>',
     { wide: true, onClose: () => onClose && onClose(done) });
@@ -52,12 +53,12 @@ export function openCreateBot({ backend, wsId, first = false, onCreated, onClose
   m.el.querySelectorAll('[data-emo]').forEach(b => b.addEventListener('click', () => { emoji = b.dataset.emo; m.el.querySelectorAll('[data-emo]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); }); }));
   f.addEventListener('submit', async e => {
     e.preventDefault(); err.textContent = '';
-    const name = f.name.value.trim(), role = f.role.value.trim(), slug = slugify(f.slug.value || name).slice(0, 32);
+    const name = f.name.value.trim(), role = f.role.value.trim(), team = f.team.value.trim(), slug = slugify(f.slug.value || name).slice(0, 32);
     if (!name) { err.textContent = 'Give the bot a name.'; f.name.focus(); return; }
     if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(slug)) { err.textContent = 'The bot id can use lowercase letters, numbers, - and _.'; f.slug.focus(); return; }
     const go = m.el.querySelector('#cbgo'); go.disabled = true; go.textContent = 'Creating…';
     try {
-      const r = await backend.createBot(wsId, { slug, name, role, emoji }); done = true;
+      const r = await backend.createBot(wsId, { slug, name, role, emoji, team }); done = true;
       f.querySelectorAll('input,button').forEach(x => { x.disabled = true; }); f.querySelector('.dlgf').remove();
       m.el.querySelector('#cbout').innerHTML = '<div class="created"><span class="okdot" aria-hidden="true">✓</span><b>' + esc(name) + ' created.</b> <span class="hint">Its desk lights up after its first report.</span></div>' + keyBlock(name, r.api_key) +
         '<div class="dlgf"><span class="hint">Next: paste the report snippet into your bot.</span><button class="btn pri" type="button" data-close>Done</button></div>';

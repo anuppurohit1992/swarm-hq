@@ -30,10 +30,11 @@ export async function renderSettings(el, { backend, workspace, headerHtml, wire,
 
   function botRows() {
     const bots = rows.rows.bots.slice().sort((a, b) => ((!!a.revoked_at) - (!!b.revoked_at)) || ((a.activity === 'idle') - (b.activity === 'idle')) || String(a.created_at).localeCompare(String(b.created_at)));
-    if (!bots.length) return '<tr><td colspan="5" class="empty">No bots yet. Add one to get its key.</td></tr>';
+    if (!bots.length) return '<tr><td colspan="6" class="empty">No bots yet. Add one to get its key.</td></tr>';
     return bots.map(b => {
       const n = esc(b.name), fresh = !b.revoked_at && isFresh(b.last_heartbeat), a = ACTS[b.activity] ? b.activity : 'idle', rv = !!b.revoked_at;
       return '<tr data-bot="' + esc(b.id) + '" class="' + (rotated === b.id ? 'rot' : '') + (rv ? ' rvkrow' : '') + '"><td><span class="nmc"><span class="av" aria-hidden="true">' + esc(b.emoji || '🤖') + '</span><span><b>' + n + '</b><small>' + esc(b.slug) + (b.role ? ' · ' + esc(b.role) : '') + '</small></span></span></td>' +
+        '<td><input class="teamin" list="teamopts" maxlength="40" placeholder="General" value="' + esc(b.team || '') + '" data-team-for="' + esc(b.id) + '" aria-label="Team for ' + n + ' (blank = General)" autocomplete="off"></td>' +
         '<td><span class="hbc' + (fresh ? ' fresh' : '') + '"><i></i>' + (b.last_heartbeat ? esc(ago(b.last_heartbeat)) : 'Never') + '</span></td>' +
         '<td>' + (rv ? '<span class="chip s-bad">Key revoked</span>' : actChip(a)) + '</td>' +
         '<td><span class="kc"><code class="kpre" title="Key prefix. Only a hash of the key is stored.">' + esc(b.key_prefix || 'sk_live_') + '…</code>' +
@@ -43,6 +44,8 @@ export async function renderSettings(el, { backend, workspace, headerHtml, wire,
         '<td><button class="btn xs ic rmb" type="button" data-k="remove" aria-label="Remove ' + n + '" title="Remove bot">' + ICON.trash + '</button></td></tr>';
     }).join('');
   }
+  function teams() { const s = new Map(); rows.rows.bots.forEach(b => { if (b.team) s.set(b.team.toLowerCase(), b.team); }); return [...s.values()].sort((a, b) => a.localeCompare(b)); }
+  function teamOpts() { return teams().map(t => '<option value="' + esc(t) + '">').join(''); }
   function memberList() {
     return members.map(m => {
       const status = m.accepted_at ? (m.is_you ? 'Signed in' : 'Joined') : 'Invite pending';
@@ -68,7 +71,7 @@ export async function renderSettings(el, { backend, workspace, headerHtml, wire,
       '<span class="inrow' + (share.share_enabled ? '' : ' dis') + '"><input class="mono" readonly ' + (share.share_enabled ? '' : 'disabled ') + 'value="' + esc(shareUrl()) + '" aria-label="Read-only link"><button class="btn" type="button" id="copylink"' + (share.share_enabled ? '' : ' disabled') + '>' + ICON.copy + 'Copy link</button>' +
       (share.share_enabled ? '<button class="btn" type="button" id="resetlink">Reset link</button>' : '') + '</span></div></section>' +
       '<section class="panel card" id="bots"><div class="ch"><h3>Bots &amp; keys <span class="cnt mono">' + rows.rows.bots.length + '</span></h3><div class="addb"><span class="hint">Each new bot gets its own key, shown once.</span><button class="btn pri" type="button" id="addbot">+ Add bot</button></div></div>' +
-      '<div class="tw"><table class="btab k2"><thead><tr><th>Bot</th><th>Last heartbeat</th><th>Status</th><th>Key</th><th><span class="sr">Remove</span></th></tr></thead><tbody id="botrows">' + botRows() + '</tbody></table></div>' +
+      '<div class="tw"><table class="btab k2"><thead><tr><th>Bot</th><th>Team</th><th>Last heartbeat</th><th>Status</th><th>Key</th><th><span class="sr">Remove</span></th></tr></thead><tbody id="botrows">' + botRows() + '</tbody></table></div><datalist id="teamopts">' + teamOpts() + '</datalist>' +
       '<div class="keynote"><span class="roi" aria-hidden="true">' + ICON.key + '</span><p><b>One key per bot.</b> Only a hash is stored, so a key is shown once and never again; the table shows its prefix. <b>Rotate</b> issues a new key and the old one stops working immediately. <b>Revoke</b> disconnects just that bot. <b>Remove</b> deletes the bot; its tasks become unassigned.</p></div></section>' +
       '<section class="panel card" id="snip"><div class="ch"><h3>Report status from a bot</h3><div class="tabs" role="tablist">' +
       [['curl', 'curl'], ['py', 'Python'], ['js', 'JavaScript']].map(([k, l]) => '<button role="tab" type="button" data-tab="' + k + '" aria-selected="' + (tab === k) + '">' + l + '</button>').join('') + '</div></div>' +
@@ -87,7 +90,7 @@ export async function renderSettings(el, { backend, workspace, headerHtml, wire,
 
   async function act(fn, ok) { if (busy) return; busy = true; try { await fn(); if (ok) toast(ok); } catch (e) { toast(e.message || 'Something went wrong', 'err'); } finally { busy = false; } }
   function addBot() {
-    openCreateBot({ backend, wsId: ws.id, first: !rows.rows.bots.length, onCreated: r => { if (!rows.rows.bots.some(x => x.id === r.bot.id)) rows.apply({ table: 'bots', eventType: 'INSERT', new: { ...r.bot, workspace_id: ws.id, activity: 'idle', doing: '', last_heartbeat: null, created_at: new Date().toISOString() } }); render(); } });
+    openCreateBot({ backend, wsId: ws.id, first: !rows.rows.bots.length, teams: teams(), onCreated: r => { if (!rows.rows.bots.some(x => x.id === r.bot.id)) rows.apply({ table: 'bots', eventType: 'INSERT', new: { ...r.bot, workspace_id: ws.id, activity: 'idle', doing: '', last_heartbeat: null, created_at: new Date().toISOString() } }); render(); } });
   }
   const onClick = e => {
     const t = e.target.closest('button,a'); if (!t || !el.contains(t)) return;
@@ -118,13 +121,21 @@ export async function renderSettings(el, { backend, workspace, headerHtml, wire,
       act(async () => { await backend.inviteViewer(ws.id, email); lastInvite = email; members = await backend.listMembers(ws.id); render(); }, 'Invited ' + email);
     }
   };
+  // Team: saved on change (Enter or leaving the field) via set_bot_team; the office moves the desk live.
+  const onChange = e => {
+    const inp = e.target.closest && e.target.closest('input[data-team-for]'); if (!inp) return;
+    const b = rows.rows.bots.find(x => x.id === inp.dataset.teamFor); if (!b) return;
+    const next = inp.value.trim().replace(/\s+/g, ' ').slice(0, 40); if ((b.team || '') === next) return;
+    act(async () => { const r = await backend.setBotTeam(b.id, next); b.team = r.team; inp.value = r.team || ''; const dl = el.querySelector('#teamopts'); if (dl) dl.innerHTML = teamOpts(); }, next ? b.name + ' moved to ' + next : b.name + ' moved to General');
+  };
+  const onKey = e => { if (e.key === 'Enter' && e.target.matches && e.target.matches('input[data-team-for]')) { e.preventDefault(); e.target.blur(); } };
   const onInput = e => { if (e.target.id === 'delname') el.querySelector('#delws').disabled = e.target.value.trim() !== ws.name; };
-  el.addEventListener('click', onClick); el.addEventListener('submit', onSubmit); el.addEventListener('input', onInput);
+  el.addEventListener('click', onClick); el.addEventListener('submit', onSubmit); el.addEventListener('input', onInput); el.addEventListener('change', onChange); el.addEventListener('keydown', onKey);
   if (openAdd) { el.querySelector('#bots').scrollIntoView({ block: 'start' }); addBot(); }
 
   // Keep the bot table live (heartbeats, first reports, revocations from other tabs).
-  let pend = 0; const redraw = () => { const tb = el.querySelector('#botrows'); if (tb && !busy) tb.innerHTML = botRows(); };
+  let pend = 0; const redraw = () => { const tb = el.querySelector('#botrows'); if (tb && !busy && !(document.activeElement && tb.contains(document.activeElement) && document.activeElement.matches('input'))) { tb.innerHTML = botRows(); const dl = el.querySelector('#teamopts'); if (dl) dl.innerHTML = teamOpts(); } };
   const unsub = backend.subscribe(ws.id, { onEvent: evt => { if (evt.table !== 'bots') return; if (rows.apply(evt) && !pend) pend = setTimeout(() => { pend = 0; redraw(); }, 200); }, onStatus: () => {}, onResync: async () => { rows.set(await backend.loadRows(ws.id)); redraw(); } });
   const tick = setInterval(redraw, 15000);
-  return () => { clearInterval(tick); clearTimeout(pend); unsub && unsub(); unwire && unwire(); el.removeEventListener('click', onClick); el.removeEventListener('submit', onSubmit); el.removeEventListener('input', onInput); document.querySelectorAll('.modal').forEach(m => m.remove()); document.body.classList.remove('has-modal'); };
+  return () => { clearInterval(tick); clearTimeout(pend); unsub && unsub(); unwire && unwire(); el.removeEventListener('click', onClick); el.removeEventListener('submit', onSubmit); el.removeEventListener('input', onInput); el.removeEventListener('change', onChange); el.removeEventListener('keydown', onKey); document.querySelectorAll('.modal').forEach(m => m.remove()); document.body.classList.remove('has-modal'); };
 }

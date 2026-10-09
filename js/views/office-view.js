@@ -28,8 +28,8 @@ function bodyMarkup(empty, o) {
   // No bots but tasks exist (e.g. every bot removed → Unassigned tasks): keep the onboarding AND show the Missions panel.
   const missions = o.hasTasks ? '<aside class="panel side" aria-labelledby="h-q"><div class="ph"><h2 id="h-q">Missions</h2><button class="btn" id="reset" type="button">Show all</button></div><p class="sel" id="sel" aria-live="polite"></p><div id="quests"></div></aside>' : '';
   const side = missions ? '<div class="sidecol">' + aside + missions + '</div>' : aside;
-  return '<section class="panel hud" id="hud" aria-label="Summary"></section><div class="welcome"><h2 class="pt">' + (o.isOwner ? 'Your office is ready <span aria-hidden="true">👋</span>' : esc(ws.name) + ' is empty') + '</h2><p class="sub">Eight empty desks and a coffee machine. Connect a bot and it takes a desk here.</p></div>' +
-    '<div class="grid"><div class="main">' + office + '</div>' + side + '</div><footer>Times in ' + esc(TZ_LABEL) + '. Desks appear as bots connect; the office grows to fit any number of bots.</footer>';
+  return '<section class="panel hud" id="hud" aria-label="Summary"></section><div class="welcome"><h2 class="pt">' + (o.isOwner ? 'Your office is ready <span aria-hidden="true">👋</span>' : esc(ws.name) + ' is empty') + '</h2><p class="sub">Ten open desks, ready for your bots. Connect a bot and it takes a desk here, in its team\'s zone.</p></div>' +
+    '<div class="grid"><div class="main">' + office + '</div>' + side + '</div><footer>Times in ' + esc(TZ_LABEL) + '. Desks fill as bots connect; there are always 10 open desks and the office grows to fit any number of bots.</footer>';
 }
 
 /**
@@ -58,7 +58,7 @@ export async function renderOfficeView(el, opts) {
     if (office) office.destroy(); if (drawer) drawer.destroy();
     body.innerHTML = bodyMarkup(empty, { ...opts, hasTasks }) + (empty ? '' : drawerMarkup());
     office = createOffice(body, {
-      data: st, live: connObj(), vacant: 8, emptyLegend: 'No bots yet · 8 open desks', emptySign: empty ? 'No bots yet · desks are ready' : '',
+      data: st, live: connObj(), emptyLegend: 'No bots yet · 10 open desks', emptySign: empty ? 'No bots yet · desks are ready' : '',
       onDesk: id => { office.select(id); drawer.open(id, office.deskEl(id)); },
       onLayout: () => drawer && drawer.placeSpot(),
     });

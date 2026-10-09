@@ -30,7 +30,7 @@ export async function renderLanding(el, { backend, focusSignIn, notice }) {
 
   // Demo office preview: fictional rows + the mock simulator.
   const demo = createDemoSource(); const rows = new WorkspaceRows(await demo.loadRows('ws-demo'));
-  const office = createOffice(el.querySelector('.preview'), { data: rows.status(), live: null });
+  const office = createOffice(el.querySelector('.preview'), { data: rows.status(), live: null, openDesks: 2 });
   const unsub = demo.subscribe('ws-demo', { onEvent: e => { if (rows.apply(e)) office.setData(rows.status()); }, onStatus: () => {} });
 
   const form = el.querySelector('#signin'), msg = el.querySelector('#formmsg'), input = el.querySelector('#email'), btn = el.querySelector('#emailbtn');

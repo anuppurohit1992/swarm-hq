@@ -4,6 +4,7 @@ export function toStatus(rows) {
   const bots = (rows.bots || []).map(b => ({
     id: b.slug, uuid: b.id, name: b.name, role: b.role, emoji: b.emoji, activity: b.activity, doing: b.doing,
     last_heartbeat: b.last_heartbeat, key_prefix: b.key_prefix, revoked: !!b.revoked_at,
+    team: b.team || '', created_at: b.created_at || '',
   }));
   const missionsSorted = (rows.missions || []).slice().sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0) || String(a.name).localeCompare(String(b.name)));
   const tasks = (rows.tasks || []).map(t => ({

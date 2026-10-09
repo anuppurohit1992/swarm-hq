@@ -2,14 +2,15 @@
    Every bot, task and message here is made up; nothing comes from a real workspace.
    Used by the public landing preview, the #/demo page and mock mode. Rows use the Supabase
    table shape from CONTRACT.md so mock mode exercises the same mapping code as live mode. */
+// slug, name, role, emoji, activity, doing, team (null = General zone). All fictional.
 const BOTS = [
-  ['lead', 'Lead Bot', 'Coordinator', '🎯', 'coordinating', 'Handing out today\'s tasks'],
-  ['mailbot', 'Inbox Bot', 'Email triage', '📬', 'typing', 'Sorting new email into folders'],
-  ['research', 'Research Bot', 'Web research', '🔎', 'browsing', 'Comparing three project tools'],
-  ['calendar', 'Calendar Bot', 'Scheduling', '📅', 'waiting', 'Waiting for replies to a meeting invite'],
-  ['code', 'Code Bot', 'Bug fixes', '💻', 'typing', 'Fixing a sign-in bug'],
-  ['writer', 'Writer Bot', 'Drafts and docs', '✍️', 'reading', 'Reading notes for the weekly update'],
-  ['support', 'Support Bot', 'Help desk', '🎧', 'idle', ''],
+  ['lead', 'Lead Bot', 'Coordinator', '🎯', 'coordinating', 'Handing out today\'s tasks', 'Front office'],
+  ['mailbot', 'Inbox Bot', 'Email triage', '📬', 'typing', 'Sorting new email into folders', 'Admin'],
+  ['research', 'Research Bot', 'Web research', '🔎', 'browsing', 'Comparing three project tools', 'Content'],
+  ['calendar', 'Calendar Bot', 'Scheduling', '📅', 'waiting', 'Waiting for replies to a meeting invite', 'Admin'],
+  ['code', 'Code Bot', 'Bug fixes', '💻', 'typing', 'Fixing a sign-in bug', 'Build'],
+  ['writer', 'Writer Bot', 'Drafts and docs', '✍️', 'reading', 'Reading notes for the weekly update', 'Content'],
+  ['support', 'Support Bot', 'Help desk', '🎧', 'idle', '', null],
 ];
 const MISSIONS = [['weekly', 'Weekly update', 0], ['ops', 'Keep things running', 1]];
 // slug, mission, title, owner, helpers, status, progress, dueDays, note
@@ -38,10 +39,10 @@ export const DEMO_WORKSPACE_ID = '00000000-0000-4000-8000-00000000d3a0';
 
 /** Demo rows in Supabase table shape. */
 export function demoRows(now = Date.now(), wsId = DEMO_WORKSPACE_ID) {
-  const bots = BOTS.map(([slug, name, role, emoji, activity, doing]) => ({
+  const bots = BOTS.map(([slug, name, role, emoji, activity, doing, team], i) => ({
     id: 'demo-bot-' + slug, workspace_id: wsId, slug, name, role, emoji, activity, doing,
     last_heartbeat: new Date(now - (HB_SECONDS[slug] || 600) * 1000).toISOString(),
-    key_prefix: prefix(slug), revoked_at: null, created_at: new Date(now - 864e5 * 3).toISOString(),
+    key_prefix: prefix(slug), revoked_at: null, created_at: new Date(now - 864e5 * 3 + i * 6e4).toISOString(), team,
   }));
   const missions = MISSIONS.map(([slug, name, sort]) => ({ id: 'demo-m-' + slug, workspace_id: wsId, slug, name, sort }));
   const tasks = TASKS.map(([slug, mission_slug, title, owner_bot, helpers, status, progress, dueDays, note]) => ({
@@ -71,3 +72,14 @@ export const SIM_DOING = {
   writer: ['Reading notes for the weekly update', 'Drafting the weekly update', 'Tightening the intro'],
   support: ['Answering a customer question', 'Updating a help article'],
 };
+
+/** Extra fictional bots for QA scenes (?mock=1&bots=N): numbered helpers spread over the demo teams and General. */
+export function extraBots(n, now = Date.now(), wsId = DEMO_WORKSPACE_ID) {
+  const teams = ['Admin', 'Content', 'Build', null], out = [];
+  for (let k = 1; k <= n; k++) {
+    const slug = 'helper-' + k;
+    out.push({ id: 'demo-bot-' + slug, workspace_id: wsId, slug, name: 'Helper Bot ' + k, role: 'Helper', emoji: '🤖', activity: k % 3 ? 'typing' : 'idle', doing: k % 3 ? 'Helping out' : '',
+      last_heartbeat: new Date(now - 30e3).toISOString(), key_prefix: prefix(slug), revoked_at: null, created_at: new Date(now - 864e5 * 2 + k * 6e4).toISOString(), team: teams[k % teams.length] });
+  }
+  return out;
+}

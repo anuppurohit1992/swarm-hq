@@ -1,10 +1,10 @@
 /* SUPABASE backend. Uses the vendored, pinned supabase-js UMD build (vendor/supabase-js-2.117.3).
    Server-side contract (tables, RLS, RPCs) is documented in BACKEND.md. Only the public anon key is used here. */
 import { authRedirectUrl } from './index.js';
-import { slugify, slugWithSuffix } from '../util.js';
+import { slugify, slugWithSuffix, normTeam } from '../util.js';
 
 const SB_SRC = new URL('../../vendor/supabase-js-2.117.3/supabase.js', import.meta.url).href;
-const BOT_COLS = 'id,workspace_id,slug,name,role,emoji,activity,doing,last_heartbeat,key_prefix,revoked_at,created_at'; // key hashes live in bot_keys (no client access)
+const BOT_COLS = 'id,workspace_id,slug,name,role,emoji,activity,doing,last_heartbeat,key_prefix,revoked_at,created_at,team'; // key hashes live in bot_keys (no client access)
 const WS_COLS = 'id,slug,name,owner_id,share_enabled,created_at,run_started_at'; // NEVER select * or share_token (column privileges)
 
 function loadScript(src) {
@@ -24,6 +24,8 @@ function chk({ data, error }) {
   if (error) { const m = /swarm:(\d+):([a-z_]+)/.exec(error.message || ''); const e = new Error(m ? (FRIENDLY[m[2]] || m[2].replace(/_/g, ' ')) : (error.message || String(error))); e.code = m ? m[2] : error.code; throw e; }
   return data;
 }
+/** bots.team arrived with migration bot_teams; if a backend doesn't have it yet, fall back to the old column list (team = General). */
+let botCols = BOT_COLS;
 function one(d) { return Array.isArray(d) ? d[0] : d; }
 
 export async function create(cfg) {
@@ -38,6 +40,11 @@ export async function create(cfg) {
   const authCbs = new Set();
   sb.auth.onAuthStateChange((_e, s) => { const nu = s ? mapUser(s.user) : null; const changed = (nu && nu.id) !== (user && user.id); user = nu; if (changed) authCbs.forEach(cb => cb(user)); });
 
+  async function selectBots(wsId) {
+    let r = await sb.from('bots').select(botCols).eq('workspace_id', wsId).order('created_at').order('id');
+    if (r.error && botCols === BOT_COLS && /team/.test(r.error.message || '')) { botCols = BOT_COLS.replace(',team', ''); r = await sb.from('bots').select(botCols).eq('workspace_id', wsId).order('created_at').order('id'); }
+    return r;
+  }
   return {
     mode: 'supabase', client: sb,
     async getUser() { return user; },
@@ -75,7 +82,7 @@ export async function create(cfg) {
       const since = new Date(Date.now() - 24 * 864e5).toISOString();
       const [ws, bots, missions, tasks, messages] = await Promise.all([
         sb.from('workspaces').select(WS_COLS).eq('id', wsId).maybeSingle(),
-        sb.from('bots').select(BOT_COLS).eq('workspace_id', wsId).order('created_at'),
+        selectBots(wsId),
         sb.from('missions').select('*').eq('workspace_id', wsId).order('sort'),
         sb.from('tasks').select('*').eq('workspace_id', wsId),
         sb.from('messages').select('*').eq('workspace_id', wsId).gte('created_at', since).order('created_at', { ascending: false }).limit(500),
@@ -142,10 +149,15 @@ export async function create(cfg) {
       return { workspace: d.workspace, rows: { bots: id(d.bots), missions: id(d.missions), tasks: id(d.tasks), messages: id(d.messages), run_started_at: d.workspace && d.workspace.run_started_at || null } };
     },
 
-    async createBot(wsId, { slug, name, role, emoji }) {
-      const r = chk(await sb.rpc('create_bot', { p_workspace_id: wsId, p_slug: slugify(slug || name), p_name: name, p_role: role || '', p_emoji: emoji || '🤖' }));
-      return { bot: { id: r.bot_id, slug: r.slug, name, role: role || '', emoji: emoji || '🤖', key_prefix: r.key_prefix, revoked_at: null }, api_key: r.key };
+    async createBot(wsId, { slug, name, role, emoji, team }) {
+      team = normTeam(team);
+      const args = { p_workspace_id: wsId, p_slug: slugify(slug || name), p_name: name, p_role: role || '', p_emoji: emoji || '🤖' };
+      if (team) args.p_team = team; // only sent when set, so the old 5-arg create_bot keeps working too
+      const r = chk(await sb.rpc('create_bot', args));
+      return { bot: { id: r.bot_id, slug: r.slug, name, role: role || '', emoji: emoji || '🤖', key_prefix: r.key_prefix, revoked_at: null, team: (r.team !== undefined ? r.team : team) || null }, api_key: r.key };
     },
+    /** Owner only. '' / null = General zone. */
+    async setBotTeam(botId, team) { const r = chk(await sb.rpc('set_bot_team', { p_bot_id: botId, p_team: normTeam(team) })); return { team: (r && r.team) || null }; },
     async rotateBotKey(botId) { const r = chk(await sb.rpc('rotate_bot_key', { p_bot_id: botId })); return { api_key: r.key, key_prefix: r.key_prefix }; },
     async revokeBotKey(botId) { chk(await sb.rpc('revoke_bot_key', { p_bot_id: botId })); },
     async removeBot(botId) { chk(await sb.rpc('remove_bot', { p_bot_id: botId })); },

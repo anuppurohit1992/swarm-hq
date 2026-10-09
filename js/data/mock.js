@@ -1,7 +1,7 @@
 /* MOCK backend: same interface as supabase.js, in memory, with simulated realtime updates.
    Nothing leaves the browser. Uses only the fictional demo dataset. */
-import { demoRows, SIM_LINES, SIM_DOING } from './demo-data.js';
-import { randHex, slugify, slugWithSuffix } from '../util.js';
+import { demoRows, extraBots, SIM_LINES, SIM_DOING } from './demo-data.js';
+import { randHex, slugify, slugWithSuffix, normTeam } from '../util.js';
 
 const B62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 function b62(n) { const a = new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a, x => B62[x % 62]).join(''); }
@@ -32,6 +32,9 @@ export function create() {
     const set = { lead: 'coordinating', mailbot: 'idle', research: 'browsing', calendar: 'waiting', code: 'typing', writer: 'idle', support: 'idle' };
     db.rows['ws-demo'].bots.forEach(b => { if (set[b.slug]) { b.activity = set[b.slug]; if (b.activity === 'idle') b.doing = ''; } if (b.slug === 'calendar') b.revoked_at = new Date(now - 36e5).toISOString(); });
   }
+  // ?mock=1&bots=N → Demo HQ grows to N bots (fictional helpers) to exercise layout growth.
+  const NB = parseInt(new URLSearchParams(location.search).get('bots'), 10);
+  if (NB > db.rows['ws-demo'].bots.length) db.rows['ws-demo'].bots.push(...extraBots(Math.min(50, NB) - db.rows['ws-demo'].bots.length, now, 'ws-demo'));
   let signedIn = false; try { signedIn = localStorage.getItem(SESSION_KEY) === '1'; } catch (e) { /* storage blocked */ }
   const authCbs = new Set(), subs = new Map(); let msgId = 1000;
   const emitAuth = () => authCbs.forEach(cb => cb(signedIn ? user : null));
@@ -86,7 +89,7 @@ export function create() {
     }
   }
 
-  return {
+  const api = {
     mode: 'mock',
     async getUser() { return signedIn ? user : null; },
     onAuth(cb) { authCbs.add(cb); return () => authCbs.delete(cb); },
@@ -145,17 +148,18 @@ export function create() {
       return { workspace: { name: w.name, slug: w.slug, run_started_at: w.run_started_at || null }, rows: snapshotRows(w.id) };
     },
 
-    async createBot(wsId, { slug, name, role, emoji }) {
+    async createBot(wsId, { slug, name, role, emoji, team }) {
       requireOwner(wsId); const R = db.rows[wsId]; slug = slugify(slug || name);
       if (!slug) throw new Error('Give the bot a name'); if (R.bots.some(b => b.slug === slug)) throw new Error('A bot with id "' + slug + '" already exists');
       const api_key = newKey(), t = new Date().toISOString();
-      const b = { id: 'bot-' + randHex(6), workspace_id: wsId, slug, name: name || slug, role: role || '', emoji: emoji || '🤖', activity: 'idle', doing: '', last_heartbeat: null, key_prefix: api_key.slice(0, 12), revoked_at: null, created_at: t };
+      const b = { id: 'bot-' + randHex(6), workspace_id: wsId, slug, name: name || slug, role: role || '', emoji: emoji || '🤖', activity: 'idle', doing: '', last_heartbeat: null, key_prefix: api_key.slice(0, 12), revoked_at: null, created_at: t, team: normTeam(team) };
       R.bots.push(b); emit(wsId, 'bots', 'INSERT', { ...b });
       // Simulate the bot's first report a few seconds later, so the desk lights up like it would for real.
-      setTimeout(() => { const x = R.bots.find(y => y.id === b.id); if (!x || x.revoked_at) return; maybeStartRun(wsId, 'typing'); x.activity = 'typing'; x.doing = 'Hello from mock mode: first report received'; x.last_heartbeat = new Date().toISOString(); emit(wsId, 'bots', 'UPDATE', { ...x }); }, 5000);
+      if (!api.qa.skipFirstReport) setTimeout(() => { const x = R.bots.find(y => y.id === b.id); if (!x || x.revoked_at) return; maybeStartRun(wsId, 'typing'); x.activity = 'typing'; x.doing = 'Hello from mock mode: first report received'; x.last_heartbeat = new Date().toISOString(); emit(wsId, 'bots', 'UPDATE', { ...x }); }, 5000);
       return { bot: { ...b }, api_key };
     },
     async rotateBotKey(botId) { const b = findBot(botId); requireOwner(b.workspace_id); const api_key = newKey(); b.key_prefix = api_key.slice(0, 12); b.revoked_at = null; emit(b.workspace_id, 'bots', 'UPDATE', { ...b }); return { api_key, key_prefix: b.key_prefix }; },
+    async setBotTeam(botId, team) { const b = findBot(botId); requireOwner(b.workspace_id); b.team = normTeam(team); emit(b.workspace_id, 'bots', 'UPDATE', { ...b }); return { team: b.team }; },
     async revokeBotKey(botId) { const b = findBot(botId); requireOwner(b.workspace_id); b.revoked_at = new Date().toISOString(); emit(b.workspace_id, 'bots', 'UPDATE', { ...b }); },
     // Mirrors remove_bot: tasks it owned become unassigned (owner_bot = null), it is dropped from helpers.
     async removeBot(botId) {
@@ -164,5 +168,9 @@ export function create() {
       R.bots = R.bots.filter(x => x.id !== botId); emit(b.workspace_id, 'bots', 'DELETE', null, { id: botId });
     },
   };
+  // QA hook (mock mode only, fictional data): drive the same realtime path the Supabase client uses.
+  api.qa = { emit, rows: id => db.rows[id], skipFirstReport: false };
+  try { window.__swarmMock = api; } catch (e) { /* ignore */ }
+  return api;
   function findBot(id) { for (const k in db.rows) { const b = db.rows[k].bots.find(x => x.id === id); if (b) return b; } throw new Error('Bot not found'); }
 }

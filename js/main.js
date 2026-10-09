@@ -43,7 +43,7 @@ function renderStart(list) {
   const none = !list.length;
   const title = del && none ? 'No workspaces yet' : none ? 'Welcome! Name your office' : 'Create a workspace';
   const lead = del ? '“' + esc(del) + '” was deleted. ' + (none ? 'You don\'t have any workspaces now. Create one to get going again.' : 'Create another one, or open one of your other workspaces.')
-    : none ? 'You don\'t have a workspace yet. Name your office to get eight empty desks for your bots. If someone invited you, ask them to invite <b>' + esc(user.email) + '</b>, then sign in again.'
+    : none ? 'You don\'t have a workspace yet. Name your office to get ten open desks for your bots. If someone invited you, ask them to invite <b>' + esc(user.email) + '</b>, then sign in again.'
     : 'Each workspace has its own bots, keys, members and share link.';
   app.innerHTML = '<div class="wrap">' + headerFor(null)() + '<div class="panel card startbox" id="startbox"><h2 class="pt">' + title + '</h2><p class="hint">' + lead + '</p>' +
     '<form id="newws" class="newws" novalidate><label class="fld"><span>Workspace name</span><input id="wsname" name="wsname" maxlength="60" autocomplete="off" value="My office" required></label>' +
