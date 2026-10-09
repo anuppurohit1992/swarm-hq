@@ -132,38 +132,37 @@ tr.rvkrow .kpre{opacity:.6;text-decoration:line-through}
 .newws{display:flex;gap:10px;align-items:flex-end;margin:16px 0 8px;flex-wrap:wrap}
 .newws .fld{flex:1;min-width:200px}
 
-/* Idle snooze: big uppercase ZZZ over the bot's head. Lowercase glyphs were too narrow to read on phones. */
-.office #ov, .office .stage { overflow: visible; }
+/* Idle snooze v2: small ZZZ just above the napping head, slightly right; Z's rise and fade, staggered.
+   Anchored by JS (left/top = head geometry); translateY(-100%) puts the cluster's bottom at that point. */
 .desk .zzz{
-  position:absolute;left:55%;top:8%;
-  transform:translate(-40%,0);
-  display:flex;flex-direction:row;align-items:flex-end;gap:1px;
-  pointer-events:none;z-index:6;line-height:1;
+  position:absolute;width:1.95em;height:1.1em;transform:translateY(-100%);
+  pointer-events:none;z-index:3;line-height:1;font-size:13px;
 }
 .desk .zzz b{
-  display:inline-block;font-style:normal;font-weight:900;
-  font-family:Impact,Haettenschweiler,"Arial Black",system-ui,sans-serif;
-  color:#f7f9ff;letter-spacing:0;
-  -webkit-text-stroke:4px #0b0e14;
-  paint-order:stroke fill;
-  text-shadow:0 3px 0 #0b0e14, 0 0 16px rgba(230,240,255,.95);
-  animation:zzzup 2s ease-in-out infinite;opacity:1;
-  font-size:26px;line-height:1;
+  position:absolute;bottom:0;left:0;display:block;font-style:normal;font-weight:900;
+  font-family:"Arial Black",Impact,system-ui,sans-serif;line-height:.8;
+  color:#eef3ff;-webkit-text-stroke:1.25px #0b0e14;paint-order:stroke fill;
+  text-shadow:0 1px 0 #0b0e14,0 0 6px rgba(220,232,255,.6);
+  opacity:0;animation:zzzrise 3.6s linear infinite;
 }
-.desk .zzz b:nth-child(2){font-size:34px;animation-delay:.2s}
-.desk .zzz b:nth-child(3){font-size:42px;animation-delay:.4s}
-.desk .plate.chief ~ .zzz{top:4%;left:58%}
-@keyframes zzzup{
-  0%,100%{transform:translateY(2px) rotate(-8deg);opacity:.8}
-  40%{transform:translateY(-14px) rotate(6deg);opacity:1}
-  70%{transform:translateY(-6px) rotate(-3deg);opacity:.95}
+/* sizes in px relative to the cluster: small → big, stepping up and to the right */
+.desk .zzz b:nth-child(1){font-size:.62em;left:0;bottom:0;animation-delay:0s}
+.desk .zzz b:nth-child(2){font-size:.8em;left:.52em;bottom:.15em;animation-delay:1.2s}
+.desk .zzz b:nth-child(3){font-size:1em;left:1.12em;bottom:.3em;animation-delay:2.4s}
+@keyframes zzzrise{
+  0%{opacity:0;transform:translate(0,3px)}
+  18%{opacity:1}
+  65%{opacity:.85}
+  100%{opacity:0;transform:translate(2px,-5px)}
 }
+/* desktop (1440): biggest Z 24px */
+.desk .zzz{font-size:24px}
+/* phone (390): biggest Z 28px, slightly thicker outline for legibility */
 @media (max-width:760px){
-  .desk .zzz{top:2%;left:52%}
-  .desk .zzz b{font-size:32px;-webkit-text-stroke:5px #0b0e14}
-  .desk .zzz b:nth-child(2){font-size:42px}
-  .desk .zzz b:nth-child(3){font-size:54px} /* unmistakable on 390px */
-  .desk .plate.chief ~ .zzz{top:0}
+  .desk .zzz{font-size:28px}
+  .desk .zzz b{-webkit-text-stroke:1.5px #0b0e14}
 }
-@media (prefers-reduced-motion:reduce){.desk .zzz b{animation:none}}
+@media (prefers-reduced-motion:reduce){
+  .desk .zzz b{animation:none;opacity:1;transform:none}
+}
 

@@ -26,6 +26,12 @@ export function create() {
     ],
     rows: { 'ws-demo': demoRows(now, 'ws-demo'), 'ws-empty': { bots: [], missions: [], tasks: [], messages: [] } },
   };
+  // ?mock=1&scene=mixed → deterministic mixed activities for QA (3 idle, 1 revoked, rest active). Fictional demo data only.
+  const SCENE = new URLSearchParams(location.search).get('scene');
+  if (SCENE === 'mixed') {
+    const set = { lead: 'coordinating', mailbot: 'idle', research: 'browsing', calendar: 'waiting', code: 'typing', writer: 'idle', support: 'idle' };
+    db.rows['ws-demo'].bots.forEach(b => { if (set[b.slug]) { b.activity = set[b.slug]; if (b.activity === 'idle') b.doing = ''; } if (b.slug === 'calendar') b.revoked_at = new Date(now - 36e5).toISOString(); });
+  }
   let signedIn = false; try { signedIn = localStorage.getItem(SESSION_KEY) === '1'; } catch (e) { /* storage blocked */ }
   const authCbs = new Set(), subs = new Map(); let msgId = 1000;
   const emitAuth = () => authCbs.forEach(cb => cb(signedIn ? user : null));
@@ -56,7 +62,7 @@ export function create() {
   function rpcGetShareToken({ p_workspace_id }) { requireOwner(p_workspace_id); const w = ws(p_workspace_id); return { enabled: w.share_enabled, token: w.share_token }; }
 
   /* --- simulated activity on Demo HQ (fictional) --- */
-  let simTimer = 0, simI = 0;
+  let simTimer = 0, simI = 0, flipTimer = 0;
   function simTick() {
     const R = db.rows['ws-demo']; if (!R.bots.length) return;
     const t = new Date().toISOString(), r = Math.random(); simI++;
@@ -111,7 +117,14 @@ export function create() {
       const s = { onEvent, onStatus, onResync }; if (!subs.has(wsId)) subs.set(wsId, new Set()); subs.get(wsId).add(s);
       onStatus && onStatus('connecting'); setTimeout(() => onStatus && onStatus('mock'), 300);
       if (wsId === 'ws-demo' && !simTimer) simTimer = setInterval(simTick, 3500);
-      return () => { subs.get(wsId).delete(s); if (wsId === 'ws-demo' && !subs.get(wsId).size) { clearInterval(simTimer); simTimer = 0; } };
+      // QA scene: deterministic idle ↔ typing flip on Inbox Bot every 4 s (on top of the random sim)
+      if (wsId === 'ws-demo' && SCENE === 'mixed' && !flipTimer) flipTimer = setInterval(() => {
+        const b = db.rows['ws-demo'].bots.find(x => x.slug === 'mailbot'); if (!b || b.revoked_at) return;
+        const next = b.activity === 'idle' ? 'typing' : 'idle'; maybeStartRun('ws-demo', next);
+        b.activity = next; b.doing = next === 'idle' ? '' : 'Sorting new email into folders'; b.last_heartbeat = new Date().toISOString();
+        emit('ws-demo', 'bots', 'UPDATE', { ...b });
+      }, 4000);
+      return () => { subs.get(wsId).delete(s); if (wsId === 'ws-demo' && !subs.get(wsId).size) { clearInterval(simTimer); simTimer = 0; clearInterval(flipTimer); flipTimer = 0; } };
     },
 
     async listMembers(wsId) { return db.members.filter(m => m.workspace_id === wsId).map(m => ({ ...m, is_you: m.user_id === user.id })); },
